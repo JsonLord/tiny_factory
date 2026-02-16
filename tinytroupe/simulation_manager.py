@@ -72,3 +72,50 @@ class SimulationManager:
 
     def get_simulation(self, simulation_id: str, user_id: str = None) -> Optional[Simulation]:
         return self.simulations.get(simulation_id)
+
+    def list_simulations(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "id": sim.id,
+                "name": sim.config.name,
+                "status": sim.status,
+                "persona_count": len(sim.personas),
+                "created_at": sim.created_at.isoformat()
+            }
+            for sim in self.simulations.values()
+        ]
+
+    def get_persona(self, simulation_id: str, persona_name: str) -> Optional[Dict[str, Any]]:
+        sim = self.get_simulation(simulation_id)
+        if not sim: return None
+        for p in sim.personas:
+            if p.name == persona_name:
+                return p._persona
+        return None
+
+    def list_personas(self, simulation_id: str) -> List[Dict[str, Any]]:
+        sim = self.get_simulation(simulation_id)
+        if not sim: return []
+        return [p._persona for p in sim.personas]
+
+    def delete_simulation(self, simulation_id: str) -> bool:
+        if simulation_id in self.simulations:
+            del self.simulations[simulation_id]
+            return True
+        return False
+
+    def export_simulation(self, simulation_id: str) -> Optional[Dict[str, Any]]:
+        sim = self.get_simulation(simulation_id)
+        if not sim: return None
+        return {
+            "id": sim.id,
+            "config": {
+                "name": sim.config.name,
+                "persona_count": sim.config.persona_count,
+                "network_type": sim.config.network_type
+            },
+            "status": sim.status,
+            "created_at": sim.created_at.isoformat(),
+            "personas": [p._persona for p in sim.personas],
+            "network": sim.network.get_metrics()
+        }

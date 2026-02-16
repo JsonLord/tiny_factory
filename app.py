@@ -4,11 +4,15 @@ import gradio as gr
 import json
 from tinytroupe.factory import TinyPersonFactory
 from tinytroupe.utils.semantics import select_best_persona
+from tinytroupe.simulation_manager import SimulationManager, SimulationConfig
+from tinytroupe.agent.social_types import Content
 from huggingface_hub import hf_hub_download, upload_file
 
 HF_TOKEN = os.getenv("HF_TOKEN") # Ensure this is set in Space secrets
 REPO_ID = "harvesthealth/tiny_factory"
 PERSONA_BASE_FILE = "persona_base.json"
+
+simulation_manager = SimulationManager()
 
 def load_persona_base():
     if not HF_TOKEN:
@@ -121,6 +125,103 @@ def find_best_persona(criteria):
         return {"error": f"Error during persona matching: {str(e)}"}
 
 
+def generate_social_network_api(name, persona_count, network_type):
+    """
+    Gradio API endpoint for generating a social network.
+    """
+    try:
+        config = SimulationConfig(name=name, persona_count=int(persona_count), network_type=network_type)
+        simulation = simulation_manager.create_simulation(config)
+        return {
+            "simulation_id": simulation.id,
+            "name": simulation.config.name,
+            "persona_count": len(simulation.personas),
+            "network_metrics": simulation.network.get_metrics()
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def predict_engagement_api(simulation_id, content_text):
+    """
+    Gradio API endpoint for predicting engagement.
+    """
+    try:
+        content = Content(text=content_text)
+        result = simulation_manager.run_simulation(simulation_id, content)
+        return {
+            "total_reach": result.total_reach,
+            "expected_likes": result.expected_likes,
+            "expected_comments": result.expected_comments,
+            "expected_shares": result.expected_shares,
+            "execution_time": result.execution_time
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def generate_variants_api(content_text, num_variants):
+    """
+    Gradio API endpoint for generating content variants.
+    """
+    try:
+        variants = simulation_manager.variant_generator.generate_variants(content_text, num_variants=int(num_variants))
+        return [{"text": v.text, "strategy": v.strategy} for v in variants]
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def list_simulations_api():
+    """
+    Gradio API endpoint for listing simulations.
+    """
+    try:
+        return simulation_manager.list_simulations()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def list_personas_api(simulation_id):
+    """
+    Gradio API endpoint for listing personas in a simulation.
+    """
+    try:
+        return simulation_manager.list_personas(simulation_id)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_persona_api(simulation_id, persona_name):
+    """
+    Gradio API endpoint for getting persona details.
+    """
+    try:
+        return simulation_manager.get_persona(simulation_id, persona_name)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def delete_simulation_api(simulation_id):
+    """
+    Gradio API endpoint for deleting a simulation.
+    """
+    try:
+        success = simulation_manager.delete_simulation(simulation_id)
+        return {"success": success}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def export_simulation_api(simulation_id):
+    """
+    Gradio API endpoint for exporting a simulation.
+    """
+    try:
+        return simulation_manager.export_simulation(simulation_id)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 with gr.Blocks() as demo:
     gr.Markdown("<h1>Tiny Persona Generator</h1>")
     with gr.Row():
@@ -160,6 +261,60 @@ with gr.Blocks() as demo:
         outputs=output_json,
         api_name="find_best_persona"
     )
+
+    # Invisible components to expose API endpoints
+    # These won't be seen by regular UI users but will be available via /api
+    with gr.Tab("Social Network API", visible=False):
+        api_net_name = gr.Textbox(label="Network Name")
+        api_net_count = gr.Number(label="Persona Count", value=10)
+        api_net_type = gr.Dropdown(choices=["scale_free", "small_world"], label="Network Type")
+        api_net_btn = gr.Button("Generate Network")
+        api_net_out = gr.JSON()
+        api_net_btn.click(generate_social_network_api, inputs=[api_net_name, api_net_count, api_net_type], outputs=api_net_out, api_name="generate_social_network")
+
+    with gr.Tab("Engagement Prediction API", visible=False):
+        api_pred_sim_id = gr.Textbox(label="Simulation ID")
+        api_pred_content = gr.Textbox(label="Content Text")
+        api_pred_btn = gr.Button("Predict Engagement")
+        api_pred_out = gr.JSON()
+        api_pred_btn.click(predict_engagement_api, inputs=[api_pred_sim_id, api_pred_content], outputs=api_pred_out, api_name="predict_engagement")
+
+    with gr.Tab("Content Variants API", visible=False):
+        api_var_content = gr.Textbox(label="Original Content")
+        api_var_count = gr.Number(label="Number of Variants", value=5)
+        api_var_btn = gr.Button("Generate Variants")
+        api_var_out = gr.JSON()
+        api_var_btn.click(generate_variants_api, inputs=[api_var_content, api_var_count], outputs=api_var_out, api_name="generate_variants")
+
+    with gr.Tab("List Simulations API", visible=False):
+        api_list_sim_btn = gr.Button("List Simulations")
+        api_list_sim_out = gr.JSON()
+        api_list_sim_btn.click(list_simulations_api, outputs=api_list_sim_out, api_name="list_simulations")
+
+    with gr.Tab("List Personas API", visible=False):
+        api_list_per_sim_id = gr.Textbox(label="Simulation ID")
+        api_list_per_btn = gr.Button("List Personas")
+        api_list_per_out = gr.JSON()
+        api_list_per_btn.click(list_personas_api, inputs=[api_list_per_sim_id], outputs=api_list_per_out, api_name="list_personas")
+
+    with gr.Tab("Get Persona API", visible=False):
+        api_get_per_sim_id = gr.Textbox(label="Simulation ID")
+        api_get_per_name = gr.Textbox(label="Persona Name")
+        api_get_per_btn = gr.Button("Get Persona")
+        api_get_per_out = gr.JSON()
+        api_get_per_btn.click(get_persona_api, inputs=[api_get_per_sim_id, api_get_per_name], outputs=api_get_per_out, api_name="get_persona")
+
+    with gr.Tab("Delete Simulation API", visible=False):
+        api_del_sim_id = gr.Textbox(label="Simulation ID")
+        api_del_btn = gr.Button("Delete Simulation")
+        api_del_out = gr.JSON()
+        api_del_btn.click(delete_simulation_api, inputs=[api_del_sim_id], outputs=api_del_out, api_name="delete_simulation")
+
+    with gr.Tab("Export Simulation API", visible=False):
+        api_exp_sim_id = gr.Textbox(label="Simulation ID")
+        api_exp_btn = gr.Button("Export Simulation")
+        api_exp_out = gr.JSON()
+        api_exp_btn.click(export_simulation_api, inputs=[api_exp_sim_id], outputs=api_exp_out, api_name="export_simulation")
 
 if __name__ == "__main__":
     demo.queue().launch()
