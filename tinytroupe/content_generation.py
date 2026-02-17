@@ -28,12 +28,11 @@ class ContentVariantGenerator:
         for i in range(num_variants):
             prompt = f"Rewrite the following content in a different style or tone:\n\n{original_content}"
 
-            response = openai_utils.client().chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}]
+            response = openai_utils.client().send_message(
+                [{"role": "user", "content": prompt}]
             )
 
-            variant_text = response.choices[0].message.content.strip()
+            variant_text = response["content"].strip()
             variants.append(ContentVariant(
                 text=variant_text,
                 strategy="style_variation",

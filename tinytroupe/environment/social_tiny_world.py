@@ -21,16 +21,23 @@ class SimulationResult:
         self.expected_shares = 0
         self.cascade_depth = 0
         self.execution_time = 0.0
+        self.avg_sentiment = 0.0
+        self.feedback_summary: List[str] = []
 
-    def add_engagement(self, persona_id: str, engagement_type: str, step: int):
+    def add_engagement(self, persona_id: str, engagement_type: str, step: int, sentiment: float = 0.0, feedback: str = None):
         self.engagements.append({
             "persona_id": persona_id,
             "type": engagement_type,
-            "step": step
+            "step": step,
+            "sentiment": sentiment,
+            "feedback": feedback
         })
         if engagement_type == "like": self.expected_likes += 1
         elif engagement_type == "comment": self.expected_comments += 1
         elif engagement_type == "share": self.expected_shares += 1
+
+        if feedback:
+            self.feedback_summary.append(feedback)
 
     def add_step_metrics(self, step: int, reach: int, engagements: int):
         self.step_metrics.append({
@@ -82,7 +89,13 @@ class SocialTinyWorld(TinyWorld):
 
                 if reaction.will_engage:
                     engaged.add(viewer_id)
-                    result.add_engagement(viewer_id, reaction.reaction_type, step)
+                    result.add_engagement(
+                        viewer_id,
+                        reaction.reaction_type,
+                        step,
+                        sentiment=reaction.sentiment,
+                        feedback=reaction.comment
+                    )
 
                     if reaction.will_share:
                         neighbors = self.network.get_neighbors(viewer_id)

@@ -125,13 +125,13 @@ def find_best_persona(criteria):
         return {"error": f"Error during persona matching: {str(e)}"}
 
 
-def generate_social_network_api(name, persona_count, network_type):
+def generate_social_network_api(name, persona_count, network_type, focus_group_name=None):
     """
     Gradio API endpoint for generating a social network.
     """
     try:
         config = SimulationConfig(name=name, persona_count=int(persona_count), network_type=network_type)
-        simulation = simulation_manager.create_simulation(config)
+        simulation = simulation_manager.create_simulation(config, focus_group_name=focus_group_name)
         return {
             "simulation_id": simulation.id,
             "name": simulation.config.name,
@@ -142,20 +142,79 @@ def generate_social_network_api(name, persona_count, network_type):
         return {"error": str(e)}
 
 
-def predict_engagement_api(simulation_id, content_text):
+def predict_engagement_api(simulation_id, content_text, format="text"):
     """
     Gradio API endpoint for predicting engagement.
     """
     try:
-        content = Content(text=content_text)
+        content = Content(text=content_text, format=format)
         result = simulation_manager.run_simulation(simulation_id, content)
         return {
             "total_reach": result.total_reach,
             "expected_likes": result.expected_likes,
             "expected_comments": result.expected_comments,
             "expected_shares": result.expected_shares,
-            "execution_time": result.execution_time
+            "execution_time": result.execution_time,
+            "avg_sentiment": result.avg_sentiment,
+            "feedback_summary": result.feedback_summary
         }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def start_simulation_async_api(simulation_id, content_text, format="text"):
+    """
+    Starts a simulation in the background.
+    """
+    try:
+        content = Content(text=content_text, format=format)
+        simulation_manager.run_simulation(simulation_id, content, background=True)
+        return {"status": "started", "simulation_id": simulation_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_simulation_status_api(simulation_id):
+    """
+    Checks the status and progress of a simulation.
+    """
+    try:
+        sim = simulation_manager.get_simulation(simulation_id)
+        if not sim: return {"error": "Simulation not found"}
+
+        status_data = {
+            "status": sim.status,
+            "progress": sim.progress
+        }
+
+        if sim.status == "completed" and sim.last_result:
+            status_data["result"] = {
+                "total_reach": sim.last_result.total_reach,
+                "expected_likes": sim.last_result.expected_likes,
+                "avg_sentiment": sim.last_result.avg_sentiment
+            }
+
+        return status_data
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def send_chat_message_api(simulation_id, sender, message):
+    """
+    Sends a message to the simulation chat.
+    """
+    try:
+        return simulation_manager.send_chat_message(simulation_id, sender, message)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_chat_history_api(simulation_id):
+    """
+    Gets the chat history for a simulation.
+    """
+    try:
+        return simulation_manager.get_chat_history(simulation_id)
     except Exception as e:
         return {"error": str(e)}
 
@@ -222,6 +281,29 @@ def export_simulation_api(simulation_id):
         return {"error": str(e)}
 
 
+def list_focus_groups_api():
+    """
+    Gradio API endpoint for listing focus groups.
+    """
+    try:
+        return simulation_manager.list_focus_groups()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def save_focus_group_api(name, simulation_id):
+    """
+    Gradio API endpoint for saving a focus group from a simulation.
+    """
+    try:
+        sim = simulation_manager.get_simulation(simulation_id)
+        if not sim: return {"error": "Simulation not found"}
+        simulation_manager.save_focus_group(name, sim.personas)
+        return {"status": "success", "name": name}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 with gr.Blocks() as demo:
     gr.Markdown("<h1>Tiny Persona Generator</h1>")
     with gr.Row():
@@ -268,16 +350,43 @@ with gr.Blocks() as demo:
         api_net_name = gr.Textbox(label="Network Name")
         api_net_count = gr.Number(label="Persona Count", value=10)
         api_net_type = gr.Dropdown(choices=["scale_free", "small_world"], label="Network Type")
+        api_net_focus = gr.Textbox(label="Focus Group Name (optional)")
         api_net_btn = gr.Button("Generate Network")
         api_net_out = gr.JSON()
-        api_net_btn.click(generate_social_network_api, inputs=[api_net_name, api_net_count, api_net_type], outputs=api_net_out, api_name="generate_social_network")
+        api_net_btn.click(generate_social_network_api, inputs=[api_net_name, api_net_count, api_net_type, api_net_focus], outputs=api_net_out, api_name="generate_social_network")
 
     with gr.Tab("Engagement Prediction API", visible=False):
         api_pred_sim_id = gr.Textbox(label="Simulation ID")
         api_pred_content = gr.Textbox(label="Content Text")
+        api_pred_format = gr.Textbox(label="Format", value="text")
         api_pred_btn = gr.Button("Predict Engagement")
         api_pred_out = gr.JSON()
-        api_pred_btn.click(predict_engagement_api, inputs=[api_pred_sim_id, api_pred_content], outputs=api_pred_out, api_name="predict_engagement")
+        api_pred_btn.click(predict_engagement_api, inputs=[api_pred_sim_id, api_pred_content, api_pred_format], outputs=api_pred_out, api_name="predict_engagement")
+
+    with gr.Tab("Async Simulation API", visible=False):
+        api_async_sim_id = gr.Textbox(label="Simulation ID")
+        api_async_content = gr.Textbox(label="Content Text")
+        api_async_format = gr.Textbox(label="Format", value="text")
+        api_async_btn = gr.Button("Start Simulation")
+        api_async_out = gr.JSON()
+        api_async_btn.click(start_simulation_async_api, inputs=[api_async_sim_id, api_async_content, api_async_format], outputs=api_async_out, api_name="start_simulation_async")
+
+        api_status_id = gr.Textbox(label="Simulation ID")
+        api_status_btn = gr.Button("Check Status")
+        api_status_out = gr.JSON()
+        api_status_btn.click(get_simulation_status_api, inputs=[api_status_id], outputs=api_status_out, api_name="get_simulation_status")
+
+    with gr.Tab("Chat API", visible=False):
+        api_chat_sim_id = gr.Textbox(label="Simulation ID")
+        api_chat_sender = gr.Textbox(label="Sender", value="User")
+        api_chat_msg = gr.Textbox(label="Message")
+        api_chat_send_btn = gr.Button("Send Message")
+        api_chat_send_out = gr.JSON()
+        api_chat_send_btn.click(send_chat_message_api, inputs=[api_chat_sim_id, api_chat_sender, api_chat_msg], outputs=api_chat_send_out, api_name="send_chat_message")
+
+        api_chat_hist_btn = gr.Button("Get History")
+        api_chat_hist_out = gr.JSON()
+        api_chat_hist_btn.click(get_chat_history_api, inputs=[api_chat_sim_id], outputs=api_chat_hist_out, api_name="get_chat_history")
 
     with gr.Tab("Content Variants API", visible=False):
         api_var_content = gr.Textbox(label="Original Content")
@@ -315,6 +424,17 @@ with gr.Blocks() as demo:
         api_exp_btn = gr.Button("Export Simulation")
         api_exp_out = gr.JSON()
         api_exp_btn.click(export_simulation_api, inputs=[api_exp_sim_id], outputs=api_exp_out, api_name="export_simulation")
+
+    with gr.Tab("Focus Group API", visible=False):
+        api_list_fg_btn = gr.Button("List Focus Groups")
+        api_list_fg_out = gr.JSON()
+        api_list_fg_btn.click(list_focus_groups_api, outputs=api_list_fg_out, api_name="list_focus_groups")
+
+        api_save_fg_name = gr.Textbox(label="Focus Group Name")
+        api_save_fg_sim_id = gr.Textbox(label="Simulation ID")
+        api_save_fg_btn = gr.Button("Save Focus Group")
+        api_save_fg_out = gr.JSON()
+        api_save_fg_btn.click(save_focus_group_api, inputs=[api_save_fg_name, api_save_fg_sim_id], outputs=api_save_fg_out, api_name="save_focus_group")
 
 if __name__ == "__main__":
     demo.queue().launch()

@@ -344,10 +344,12 @@ class TinyPersonFactory(TinyFactory):
     @config_manager.config_defaults(parallelize="parallel_agent_generation")
     def generate_from_linkedin_profile(self, profile_data: Dict) -> TinyPerson:
         """
-        Generate a TinyPerson from a LinkedIn profile.
+        Generate a TinyPerson from a LinkedIn profile with enriched traits.
         """
         description = f"Professional with headline: {profile_data.get('headline', '')}. " \
                       f"Industry: {profile_data.get('industry', '')}. " \
+                      f"Location: {profile_data.get('location', 'Global')}. " \
+                      f"Career level: {profile_data.get('career_level', 'Mid Level')}. " \
                       f"Summary: {profile_data.get('summary', '')}"
 
         return self.generate_person(agent_particularities=description)

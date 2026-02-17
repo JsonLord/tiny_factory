@@ -35,16 +35,16 @@ class LLMPredictor:
         }}
         """
 
-        response = openai_utils.client().chat.completions.create(
-            model=self.model,
-            messages=[
+        response = openai_utils.client().send_message(
+            [
                 {"role": "system", "content": "You are an expert in social psychology and behavioral prediction."},
                 {"role": "user", "content": prompt}
             ],
+            temperature=0.3,
             response_format={"type": "json_object"}
         )
 
-        prediction = json.loads(response.choices[0].message.content)
+        prediction = json.loads(response["content"])
 
         return Reaction(
             will_engage=prediction["will_engage"],

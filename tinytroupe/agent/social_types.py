@@ -33,7 +33,7 @@ class Content:
     text: str
     content_id: Optional[str] = None
     topics: List[str] = field(default_factory=list)
-    format: str = "text" # "article", "video", "poll", etc.
+    format: str = "text" # "article", "video", "poll", "survey", "ux_test", "email", "ad", etc.
     length: int = 0
     tone: str = "neutral"
     author_name: Optional[str] = None
@@ -48,10 +48,12 @@ class Content:
 
 @dataclass
 class Reaction:
-    reaction_type: str # "like", "love", "insightful", "celebrate", "none"
+    reaction_type: str # "like", "love", "insightful", "celebrate", "none", "positive", "negative", "neutral"
     will_engage: bool
     probability: float
     reasoning: Optional[str] = None
     comment: Optional[str] = None
     will_share: bool = False
     virality_coefficient: float = 0.0
+    sentiment: float = 0.0 # -1.0 to 1.0
+    detailed_feedback: Dict[str, Any] = field(default_factory=dict) # For surveys/UX tests

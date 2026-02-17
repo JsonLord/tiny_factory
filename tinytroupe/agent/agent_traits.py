@@ -71,17 +71,17 @@ class TraitBasedBehaviorModel:
         Provide the result in JSON format.
         """
 
-        response = openai_utils.client().chat.completions.create(
-            model=self.model,
-            messages=[
+        response = openai_utils.client().send_message(
+            [
                 {"role": "system", "content": "You are an expert psychologist and persona modeler."},
                 {"role": "user", "content": prompt}
             ],
+            temperature=0.3,
             response_format={"type": "json_object"}
         )
 
         try:
-            traits = json.loads(response.choices[0].message.content)
+            traits = json.loads(response["content"])
             return traits
         except Exception:
             return TraitProfile().__dict__

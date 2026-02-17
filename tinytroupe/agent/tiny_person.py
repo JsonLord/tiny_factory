@@ -1826,49 +1826,24 @@ max_content_length=max_content_length,
 
     def calculate_engagement_probability(self, content: Content) -> float:
         """
-        Analyze content features and return probability of engagement.
+        Analyze content features and return probability of engagement using the prediction engine.
         """
-        # Analyze content features (topic, format, length, tone)
-        # Apply persona's engagement patterns
-        # Factor in social influence from connections
+        from tinytroupe.ml_models import EngagementPredictor
+        predictor = EngagementPredictor()
 
-        # This is a placeholder for the actual implementation which would likely involve LLM or ML models
-        # For now, we use a simple heuristic
+        # Use the environment's network topology if available
+        network = getattr(self.environment, 'network', None)
 
-        topic_score = 0.0
-        for topic in content.topics:
-            topic_score = max(topic_score, self.engagement_patterns["topic_affinities"].get(topic, 0.0))
-
-        format_score = self.engagement_patterns["content_type_preferences"].get(content.format, 0.5)
-
-        base_prob = (topic_score + format_score) / 2.0
-
-        # Factor in social influence (simulated)
-        social_influence = 0.0
-        if hasattr(self, 'environment') and self.environment:
-            # Check if connections in the same environment have engaged
-            pass
-
-        return base_prob
+        return predictor.predict(self, content, network)
 
     def predict_reaction(self, content: Content) -> Reaction:
         """
-        Determine reaction type and generate comment if applicable.
+        Determine reaction type using the LLM-based predictor.
         """
-        prob = self.calculate_engagement_probability(content)
-        will_engage = prob > 0.5
+        from tinytroupe.llm_predictor import LLMPredictor
+        predictor = LLMPredictor()
 
-        reaction_type = "none"
-        if will_engage:
-            reaction_type = "like" # Default
-
-        return Reaction(
-            reaction_type=reaction_type,
-            will_engage=will_engage,
-            probability=prob,
-            reasoning="Simulated reaction based on affinities.",
-            will_share=prob > 0.8
-        )
+        return predictor.predict(self, content)
 
     def update_from_interaction(self, interaction: Any) -> None:
         """
