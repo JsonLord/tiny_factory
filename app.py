@@ -9,7 +9,7 @@ from tinytroupe.agent.social_types import Content
 from huggingface_hub import hf_hub_download, upload_file
 
 HF_TOKEN = os.getenv("HF_TOKEN") # Ensure this is set in Space secrets
-REPO_ID = "harvesthealth/tiny_factory"
+REPO_ID = "AUXteam/tiny_factory"
 PERSONA_BASE_FILE = "persona_base.json"
 
 simulation_manager = SimulationManager()
