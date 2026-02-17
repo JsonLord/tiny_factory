@@ -281,6 +281,36 @@ def export_simulation_api(simulation_id):
         return {"error": str(e)}
 
 
+def get_network_graph_api(simulation_id):
+    """
+    Gradio API endpoint for getting network graph data.
+    """
+    try:
+        sim = simulation_manager.get_simulation(simulation_id)
+        if not sim: return {"error": "Simulation not found"}
+
+        nodes = []
+        for p in sim.personas:
+            nodes.append({
+                "id": p.name,
+                "label": p.name,
+                "role": p._persona.get("occupation"),
+                "location": p._persona.get("residence")
+            })
+
+        edges = []
+        for edge in sim.network.edges:
+            edges.append({
+                "source": edge.connection_id.split('_')[0],
+                "target": edge.connection_id.split('_')[1],
+                "strength": edge.strength
+            })
+
+        return {"nodes": nodes, "edges": edges}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def list_focus_groups_api():
     """
     Gradio API endpoint for listing focus groups.
@@ -424,6 +454,12 @@ with gr.Blocks() as demo:
         api_exp_btn = gr.Button("Export Simulation")
         api_exp_out = gr.JSON()
         api_exp_btn.click(export_simulation_api, inputs=[api_exp_sim_id], outputs=api_exp_out, api_name="export_simulation")
+
+    with gr.Tab("Network Graph API", visible=False):
+        api_graph_sim_id = gr.Textbox(label="Simulation ID")
+        api_graph_btn = gr.Button("Get Graph Data")
+        api_graph_out = gr.JSON()
+        api_graph_btn.click(get_network_graph_api, inputs=[api_graph_sim_id], outputs=api_graph_out, api_name="get_network_graph")
 
     with gr.Tab("Focus Group API", visible=False):
         api_list_fg_btn = gr.Button("List Focus Groups")
