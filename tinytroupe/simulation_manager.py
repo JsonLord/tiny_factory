@@ -13,7 +13,8 @@ from tinytroupe.ml_models import EngagementPredictor
 from tinytroupe.content_generation import ContentVariantGenerator
 from tinytroupe.network_generator import NetworkGenerator
 import tinytroupe.openai_utils as openai_utils
-from tinytroupe.utils.config import config
+from tinytroupe import utils
+config = utils.read_config_file()
 from tinytroupe.agent import logger
 
 class SimulationConfig:
