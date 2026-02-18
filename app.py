@@ -44,7 +44,75 @@ def get_persona_details(sim_id, persona_name):
     persona = simulation_manager.get_persona(sim_id, persona_name)
     return json.dumps(persona, indent=2) if persona else "Not found"
 
-# UI
+# API functions for backward compatibility
+def generate_social_network_api(name, persona_count, network_type, focus_group_name=None):
+    config = SimulationConfig(name=name, persona_count=int(persona_count), network_type=network_type)
+    sim = simulation_manager.create_simulation(config, focus_group_name)
+    return {"simulation_id": sim.id, "persona_count": len(sim.personas)}
+
+def predict_engagement_api(simulation_id, content_text, format_type):
+    sim = simulation_manager.get_simulation(simulation_id)
+    if not sim: return {"error": "Simulation not found"}
+    content = Content(text=content_text, format=format_type)
+    results = []
+    for p in sim.personas:
+        reaction = p.predict_reaction(content)
+        results.append({"persona": p.name, "will_engage": reaction.will_engage, "probability": reaction.probability})
+    return results
+
+def start_simulation_async_api(simulation_id, content_text, format_type):
+    content = Content(text=content_text, format=format_type)
+    simulation_manager.run_simulation(simulation_id, content, background=True)
+    return {"status": "started", "simulation_id": simulation_id}
+
+def get_simulation_status_api(simulation_id):
+    sim = simulation_manager.get_simulation(simulation_id)
+    if not sim: return {"error": "Simulation not found"}
+    return {"status": sim.status, "progress": sim.progress}
+
+def send_chat_message_api(simulation_id, sender, message):
+    return simulation_manager.send_chat_message(simulation_id, sender, message)
+
+def get_chat_history_api(simulation_id):
+    return simulation_manager.get_chat_history(simulation_id)
+
+def generate_variants_api(original_content, num_variants):
+    variants = simulation_manager.variant_generator.generate_variants(original_content, int(num_variants))
+    return [v.text for v in variants]
+
+def list_simulations_api():
+    return simulation_manager.list_simulations()
+
+def list_personas_api(simulation_id):
+    return simulation_manager.list_personas(simulation_id)
+
+def get_persona_api(simulation_id, persona_name):
+    return simulation_manager.get_persona(simulation_id, persona_name)
+
+def delete_simulation_api(simulation_id):
+    success = simulation_manager.delete_simulation(simulation_id)
+    return {"success": success}
+
+def export_simulation_api(simulation_id):
+    return simulation_manager.export_simulation(simulation_id)
+
+def get_network_graph_api(simulation_id):
+    sim = simulation_manager.get_simulation(simulation_id)
+    if not sim: return {"error": "Simulation not found"}
+    nodes = [{"id": p.name, "label": p.name, "role": p._persona.get("occupation")} for p in sim.personas]
+    edges = [{"source": e.connection_id.split('_')[0], "target": e.connection_id.split('_')[1]} for e in sim.network.edges]
+    return {"nodes": nodes, "edges": edges}
+
+def list_focus_groups_api():
+    return simulation_manager.list_focus_groups()
+
+def save_focus_group_api(name, simulation_id):
+    sim = simulation_manager.get_simulation(simulation_id)
+    if not sim: return {"error": "Simulation not found"}
+    simulation_manager.save_focus_group(name, sim.personas)
+    return {"status": "success", "name": name}
+
+# UI Layout
 with gr.Blocks(css=".big-input textarea { height: 300px !important; } #mesh-network-container { height: 600px; background: #101622; border-radius: 12px; }", title="Tiny Factory") as demo:
     gr.HTML('<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>')
     gr.Markdown("# 🌐 Tiny Factory: Social Simulation Dashboard")
@@ -85,7 +153,7 @@ with gr.Blocks(css=".big-input textarea { height: 300px !important; } #mesh-netw
     nodes_state = gr.State([])
     edges_state = gr.State([])
 
-    # Hidden button for JS to trigger Gradio event
+    # Hidden components for JS interaction
     js_trigger = gr.Textbox(visible=False, elem_id="js_trigger_textbox")
     js_trigger_btn = gr.Button("trigger", visible=False, elem_id="js_trigger_btn")
 
