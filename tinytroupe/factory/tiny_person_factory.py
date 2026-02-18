@@ -1140,8 +1140,8 @@ class TinyPersonFactory(TinyFactory):
         """
         samples = []
         for sample in sampling_plan:
-            if "quantity" not in sample:
-                logger.warning(f"Sample in sampling plan does not have a 'quantity' field: {sample}. Assuming 1.")
+            if "quantity" not in sample or sample["quantity"] is None:
+                logger.warning(f"Sample in sampling plan does not have a valid 'quantity' field: {sample}. Assuming 1.")
                 qty = 1
             else:
                 qty = int(sample["quantity"])
