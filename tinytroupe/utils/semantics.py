@@ -286,3 +286,24 @@ def select_best_persona(criteria: str, personas: list) -> int:
         int: The index of the best matching persona, or -1 if none match.
     """
     # llm decorator will handle the body of this function
+
+@llm()
+def select_relevant_personas_utility(context: str, personas: list) -> list:
+    """
+    Given a context and a list of personas (each a dictionary),
+    select which personas are relevant to the context.
+
+    Rules:
+    - Analyze each persona against the provided context.
+    - Return a LIST of indices (starting from 0) of the relevant personas.
+    - Return an empty list [] if none match.
+    - Provide the result as a JSON array of integers.
+
+    Args:
+        context (str): The context or requirements for persona selection.
+        personas (list): A list of dictionaries, where each dictionary is a persona specification.
+
+    Returns:
+        list: A list of indices of the matching personas.
+    """
+    # llm decorator will handle the body of this function

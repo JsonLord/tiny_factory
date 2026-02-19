@@ -2,8 +2,9 @@ import sys
 import os
 import gradio as gr
 import json
+import glob
 from tinytroupe.factory import TinyPersonFactory
-from tinytroupe.utils.semantics import select_best_persona
+from tinytroupe.utils.semantics import select_best_persona, select_relevant_personas_utility
 from tinytroupe.simulation_manager import SimulationManager, SimulationConfig
 from tinytroupe.agent.social_types import Content
 from huggingface_hub import hf_hub_download, upload_file
@@ -123,6 +124,59 @@ def find_best_persona(criteria):
             return {"error": f"No matching persona found for criteria: {criteria}"}
     except Exception as e:
         return {"error": f"Error during persona matching: {str(e)}"}
+
+
+def load_example_personas():
+    """
+    Loads example personas from the tinytroupe library.
+    """
+    example_personas = []
+    # Path to the agents folder in tinytroupe/examples
+    agents_path = os.path.join("tinytroupe", "examples", "agents", "*.agent.json")
+    for file_path in glob.glob(agents_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if "persona" in data:
+                    example_personas.append(data["persona"])
+        except Exception as e:
+            print(f"Error loading example persona from {file_path}: {e}")
+    return example_personas
+
+
+def identify_personas(context):
+    """
+    Identifies appropriate personas from the Tresor and example agents based on context.
+    """
+    try:
+        # 1. Load Tresor personas (persisted JSON)
+        tresor_personas = load_persona_base()
+
+        # 2. Load Example personas from tinytroupe library
+        example_personas = load_example_personas()
+
+        all_available = tresor_personas + example_personas
+
+        if not all_available:
+            return {"error": "No personas available in Tresor or examples."}
+
+        # 3. Use LLM to filter/select which ones match the 'context'
+        # Returns a list of indices
+        indices = select_relevant_personas_utility(context, all_available)
+
+        selected = []
+        if isinstance(indices, list):
+            for i in indices:
+                try:
+                    idx = int(i)
+                    if 0 <= idx < len(all_available):
+                        selected.append(all_available[idx])
+                except (ValueError, TypeError):
+                    continue
+
+        return selected
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def generate_social_network_api(name, persona_count, network_type, focus_group_name=None):
@@ -373,6 +427,12 @@ with gr.Blocks() as demo:
         outputs=output_json,
         api_name="find_best_persona"
     )
+
+    with gr.Tab("Identify Personas API", visible=False):
+        api_id_context = gr.Textbox(label="Context")
+        api_id_btn = gr.Button("Identify Personas")
+        api_id_out = gr.JSON()
+        api_id_btn.click(identify_personas, inputs=[api_id_context], outputs=api_id_out, api_name="identify_personas")
 
     # Invisible components to expose API endpoints
     # These won't be seen by regular UI users but will be available via /api
