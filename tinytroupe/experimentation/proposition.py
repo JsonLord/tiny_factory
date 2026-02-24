@@ -15,7 +15,7 @@ class Proposition:
     MAX_SCORE = 9
 
     def __init__(self, claim:str, target=None, include_personas:bool=False, first_n:int=None, last_n:int=None,
-                 double_check:bool=False, use_reasoning_model:bool=False, precondition_function=None):
+                 double_check:bool=False, use_reasoning_model:bool=False, precondition_function=None, model:str=None):
         """ 
         Define a proposition as a (textual) claim about a target, which can be a TinyWorld, a TinyPerson or several of any.
         The proposition's truth value can then either be checked as a boolean or computed as an integer score denoting the degree of truth.
@@ -55,6 +55,8 @@ class Proposition:
 
         self.precondition_function = precondition_function
 
+        self.model = model
+
         # the chat with the LLM is preserved until the proposition is re-evaluated. While it is available,
         # the chat can be used to follow up on the proposition, e.g., to ask for more details about the evaluation.
         self.llm_chat = None
@@ -79,7 +81,8 @@ class Proposition:
             last_n=self.last_n,
             double_check=self.double_check,
             use_reasoning_model=self.use_reasoning_model,
-            precondition_function=self.precondition_function
+            precondition_function=self.precondition_function,
+            model=self.model
         )
         return new_prop
 
@@ -368,6 +371,9 @@ class Proposition:
         return recommendation
 
     def _model(self, use_reasoning_model):
+        if self.model:
+            return self.model
+
         if use_reasoning_model:
             return default["reasoning_model"]
         else:
