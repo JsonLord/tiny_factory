@@ -5,6 +5,9 @@ import json
 from tinytroupe.factory import TinyPersonFactory
 from tinytroupe.utils.semantics import select_best_persona
 from huggingface_hub import hf_hub_download, upload_file
+from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+import uvicorn
 
 HF_TOKEN = os.getenv("HF_TOKEN") # Ensure this is set in Space secrets
 REPO_ID = "harvesthealth/tiny_factory"
@@ -161,5 +164,17 @@ with gr.Blocks() as demo:
         api_name="find_best_persona"
     )
 
+app = FastAPI()
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+@app.get("/api-docs")
+def api_docs():
+    return RedirectResponse(url="/docs")
+
+app = gr.mount_gradio_app(app, demo, path="/")
+
 if __name__ == "__main__":
-    demo.queue().launch()
+    uvicorn.run(app, host="0.0.0.0", port=7860)
