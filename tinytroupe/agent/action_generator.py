@@ -67,7 +67,6 @@ class ActionGenerator(JsonSerializableRegistry):
         # This generator has its own copies of the propositions, in order to be able to isolate them
         # from other agents, particularly when running the simulation in parallel.
         self.action_persona_adherence = propositions.hard_action_persona_adherence.copy()
-        self.action_persona_adherence.model = "alias-large" # Critical check uses a larger model
 
         self.action_self_consistency = propositions.action_self_consistency.copy()
         self.action_fluency = propositions.action_fluency.copy()
