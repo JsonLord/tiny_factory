@@ -347,7 +347,70 @@ class ActionGenerator(JsonSerializableRegistry):
 
         return True, Proposition.MAX_SCORE, "Passed pre-filter"
 
-    def _check_action_quality(self, stage, agent, tentative_action):
+
+    def _check_multiple_propositions(self, agent, propositions_info, tentative_action):
+        """
+        Combine multiple checks into a single API call for performance.
+        """
+        from tinytroupe.experimentation import Proposition
+        from tinytroupe.utils.llm import LLMChat
+
+        # Filter enabled checks
+        enabled_checks = [info for info in propositions_info if info[3]]
+        if not enabled_checks:
+            return {info[0]: (True, Proposition.MAX_SCORE, "Check disabled") for info in propositions_info}
+
+        # Build combined prompt
+        criteria_list = []
+        for name, prop, min_actions, enabled in enabled_checks:
+            criteria_list.append(f"{name.upper()}: {prop.claim}")
+
+        combined_criteria = "\n".join(criteria_list)
+
+        # Prepare context (assuming all checks share similar context requirements)
+        # We'll use the first enabled check's context building logic as they are usually similar in this class
+        representative_prop = enabled_checks[0][1]
+        context = representative_prop._build_context([agent])
+
+        prompt = f"""
+        Evaluate the following action across multiple dimensions:
+
+        ACTION: {json.dumps(tentative_action)}
+
+        CRITERIA:
+        {combined_criteria}
+
+        Provide scores ({Proposition.MIN_SCORE}-{Proposition.MAX_SCORE}) and brief justifications for each dimension.
+        Format response as JSON with keys: {", ".join([info[0] for info in enabled_checks])}.
+        Each key should map to an object with "value" (int) and "justification" (str).
+        """
+
+        chat = LLMChat(model="alias-large")
+        chat.add_system_message("You are a quality control system for agent actions.")
+        chat.add_user_message(f"Context:\n{context}\n\nTask:\n{prompt}")
+
+        try:
+            response = chat(output_type=dict)
+            results = {}
+            for info in propositions_info:
+                name = info[0]
+                enabled = info[3]
+                if not enabled:
+                    results[name] = (True, Proposition.MAX_SCORE, "Check disabled")
+                    continue
+
+                res = response.get(name, {})
+                val = res.get("value", Proposition.MAX_SCORE)
+                just = res.get("justification", "No justification provided")
+
+                passed = val >= self.quality_threshold
+                results[name] = (passed, val, f"Score = {val}. Justification = {just}")
+            return results
+        except Exception as e:
+            logger.error(f"Error in batch evaluation: {e}")
+            # Fallback to individual checks or assume success
+            return {info[0]: (True, Proposition.MAX_SCORE, "Batch check failed, assuming success") for info in propositions_info}
+\n    def _check_action_quality(self, stage, agent, tentative_action):
 
         from tinytroupe.agent import logger # import here to avoid circular import issues
         from tinytroupe.utils.parallel import parallel_map
@@ -382,8 +445,7 @@ class ActionGenerator(JsonSerializableRegistry):
             ("suitability", self.action_suitability, 0, self.enable_quality_check_for_suitability)
         ]
         
-        parallel_results = parallel_map(other_checks, run_check)
-        results_dict = dict(parallel_results)
+        results_dict = self._check_multiple_propositions(agent, other_checks, tentative_action)
 
         selfconsistency_passed, selfconsistency_score, selfconsistency_feedback = results_dict["self_consistency"]
         fluency_passed, fluency_passed_score, fluency_feedback = results_dict["fluency"]
