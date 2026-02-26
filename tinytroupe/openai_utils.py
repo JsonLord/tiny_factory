@@ -267,11 +267,24 @@ class OpenAIClient:
             # complete message
             logger.debug(f"   --> Complete messages sent to LLM: {chat_api_params['messages']}")
 
-            result_message = self.client.beta.chat.completions.parse(
-                    **chat_api_params
-                )
+            try:
+                result_message = self.client.beta.chat.completions.parse(
+                        **chat_api_params
+                    )
+                return result_message
+            except Exception as e:
+                logger.warning(f"Error while parsing LLM response with .parse(): {e}. Falling back to .create().")
+                # Fallback to regular create if parse fails (e.g. due to messy JSON with <think> tags)
+                # We need to remove response_format if it's a Pydantic model for create()
+                # but wait, completions.create also supports response_format={"type": "json_object"}
 
-            return result_message 
+                # If it was a Pydantic model, we convert it to json_object for the fallback
+                if not isinstance(chat_api_params["response_format"], dict):
+                    chat_api_params["response_format"] = {"type": "json_object"}
+
+                return self.client.chat.completions.create(
+                            **chat_api_params
+                        )
         
         else:
             logger.debug(f"Calling LLM model with these parameters: {logged_params}. Not showing 'messages' parameter.")

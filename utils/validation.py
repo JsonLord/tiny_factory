@@ -4,6 +4,7 @@ import unicodedata
 
 from pydantic import ValidationError, BaseModel
 from tinytroupe.utils import logger
+from tinytroupe.utils.llm import extract_json
 
 ################################################################################
 # Validation
@@ -58,7 +59,7 @@ def to_pydantic_or_sanitized_dict(value: dict, model: BaseModel=None) -> dict:
     if model is not None and (isinstance(model, type) and issubclass(model, BaseModel)):
         # If a model is provided, try to validate the value against the model
         try:
-            res = model.model_validate(sanitize_dict(json.loads(value['content'])))
+            res = model.model_validate(sanitize_dict(extract_json(value['content'])))
             return res
         except ValidationError as e:
             logger.warning(f"Validation error: {e}")

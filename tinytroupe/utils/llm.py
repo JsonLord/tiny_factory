@@ -850,6 +850,10 @@ def extract_json(text: str) -> dict:
     try:
         logger.debug(f"Extracting JSON from text: {text}")
 
+        # Remove <think>...</think> blocks if they exist
+        if isinstance(text, str):
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+
         # if it already is a dictionary or list, return it
         if isinstance(text, dict) or isinstance(text, list):
 

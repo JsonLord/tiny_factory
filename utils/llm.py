@@ -721,7 +721,7 @@ class LLMChat:
 
     def _request_list_of_dict_llm_message(self):
             return {"role": "user",
-                    "content": "The `value` field you generate **must** be a list of dictionaries, specified as a JSON structure embedded in a string. For example, `[\{...\}, \{...\}, ...]`. This is critical for later processing."}
+                    "content": "The `value` field you generate **must** be a list of dictionaries, specified as a JSON structure embedded in a string. For example, `[\\{...\\}, \\{...\\}, ...]`. This is critical for later processing."}
 
     def _coerce_to_list(self, llm_output:str):
         """
@@ -849,6 +849,10 @@ def extract_json(text: str) -> dict:
     """
     try:
         logger.debug(f"Extracting JSON from text: {text}")
+
+        # Remove <think>...</think> blocks if they exist
+        if isinstance(text, str):
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
 
         # if it already is a dictionary or list, return it
         if isinstance(text, dict) or isinstance(text, list):
