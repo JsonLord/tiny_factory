@@ -11,13 +11,13 @@ from tinytroupe.experimentation import Proposition
 
 class ActionGenerator(JsonSerializableRegistry):
 
-    def __init__(self, max_attempts=2, 
+    def __init__(self, max_attempts=1,
                  enable_quality_checks=True,
                  enable_regeneration=True,
                  enable_direct_correction=False, # TODO enable_direct_correction not working very well yet
                  enable_quality_check_for_persona_adherence=True,
                  enable_quality_check_for_selfconsistency=True,
-                 enable_quality_check_for_fluency=True,
+                 enable_quality_check_for_fluency=False,
                  enable_quality_check_for_suitability=False,
                  enable_quality_check_for_similarity=False,
                  continue_on_failure=True,
@@ -67,9 +67,17 @@ class ActionGenerator(JsonSerializableRegistry):
         # This generator has its own copies of the propositions, in order to be able to isolate them
         # from other agents, particularly when running the simulation in parallel.
         self.action_persona_adherence = propositions.hard_action_persona_adherence.copy()
+
         self.action_self_consistency = propositions.action_self_consistency.copy()
+        self.action_self_consistency.model = "alias-large"
+
         self.action_fluency = propositions.action_fluency.copy()
+        self.action_fluency.model = "alias-large"
+
         self.action_suitability = propositions.action_suitability.copy()
+        self.action_suitability.model = "alias-large"
+
+        # Non-critical checks use the default model (assumed to be faster)
 
         # initialize statistics  
         self.regeneration_failures = 0
@@ -78,6 +86,9 @@ class ActionGenerator(JsonSerializableRegistry):
         self.direct_correction_scores = []
         self.total_actions_produced = 0
         self.total_original_actions_succeeded = 0
+
+        # initialize evaluation cache
+        self.evaluation_cache = {}
 
     def generate_next_action(self, agent, current_messages:list):
 
@@ -317,25 +328,131 @@ class ActionGenerator(JsonSerializableRegistry):
     # Quality evaluation methods
     ###############################################################################################
 
+    def _pre_filter_action(self, action):
+        """
+        Quick rule-based checks before LLM evaluation.
+        """
+        content = action.get("content", "")
+        if not isinstance(content, str):
+            content = str(content)
+
+        # Check for obvious violations without LLM
+        if len(content) < 5:
+            return False, 0, "Action too short - rule-based filter"
+
+        # Check for prohibited content patterns
+        prohibited_patterns = ["I cannot", "I'm sorry", "As an AI"]
+        if any(pattern in content for pattern in prohibited_patterns):
+            return False, 0, "Prohibited content pattern detected"
+
+        return True, Proposition.MAX_SCORE, "Passed pre-filter"
+
+
+    def _check_multiple_propositions(self, agent, propositions_info, tentative_action):
+        """
+        Combine multiple checks into a single API call for performance.
+        """
+        from tinytroupe.experimentation import Proposition
+        from tinytroupe.utils.llm import LLMChat
+
+        # Filter enabled checks
+        enabled_checks = [info for info in propositions_info if info[3]]
+        if not enabled_checks:
+            return {info[0]: (True, Proposition.MAX_SCORE, "Check disabled") for info in propositions_info}
+
+        # Build combined prompt
+        criteria_list = []
+        for name, prop, min_actions, enabled in enabled_checks:
+            criteria_list.append(f"{name.upper()}: {prop.claim}")
+
+        combined_criteria = "\n".join(criteria_list)
+
+        # Prepare context (assuming all checks share similar context requirements)
+        # We'll use the first enabled check's context building logic as they are usually similar in this class
+        representative_prop = enabled_checks[0][1]
+        context = representative_prop._build_context([agent])
+
+        prompt = f"""
+        Evaluate the following action across multiple dimensions:
+
+        ACTION: {json.dumps(tentative_action)}
+
+        CRITERIA:
+        {combined_criteria}
+
+        Provide scores ({Proposition.MIN_SCORE}-{Proposition.MAX_SCORE}) and brief justifications for each dimension.
+        Format response as JSON with keys: {", ".join([info[0] for info in enabled_checks])}.
+        Each key should map to an object with "value" (int) and "justification" (str).
+        """
+
+        chat = LLMChat(model="alias-large")
+        chat.add_system_message("You are a quality control system for agent actions.")
+        chat.add_user_message(f"Context:\n{context}\n\nTask:\n{prompt}")
+
+        try:
+            response = chat(output_type=dict)
+            results = {}
+            for info in propositions_info:
+                name = info[0]
+                enabled = info[3]
+                if not enabled:
+                    results[name] = (True, Proposition.MAX_SCORE, "Check disabled")
+                    continue
+
+                res = response.get(name, {})
+                val = res.get("value", Proposition.MAX_SCORE)
+                just = res.get("justification", "No justification provided")
+
+                passed = val >= self.quality_threshold
+                results[name] = (passed, val, f"Score = {val}. Justification = {just}")
+            return results
+        except Exception as e:
+            logger.error(f"Error in batch evaluation: {e}")
+            # Fallback to individual checks or assume success
+            return {info[0]: (True, Proposition.MAX_SCORE, "Batch check failed, assuming success") for info in propositions_info}
+
     def _check_action_quality(self, stage, agent, tentative_action):
 
         from tinytroupe.agent import logger # import here to avoid circular import issues
+        from tinytroupe.utils.parallel import parallel_map
 
         #
-        # Compute various propositions about the action
+        # Pre-filter check
+        #
+        pre_filter_passed, pre_filter_score, pre_filter_feedback = self._pre_filter_action(tentative_action)
+        if not pre_filter_passed:
+            return False, pre_filter_score, pre_filter_feedback
+
+        #
+        # Critical Check: Persona Adherence (Sequential because it's critical and common to fail)
         #
         persona_adherence_passed, persona_adherence_score, persona_adherence_feedback = \
             self._check_proposition(agent, self.action_persona_adherence, tentative_action, enable_proposition_check=self.enable_quality_check_for_persona_adherence)
         
-        selfconsistency_passed, selfconsistency_score, selfconsistency_feedback = \
-            self._check_proposition(agent, self.action_self_consistency, tentative_action, minimum_required_qty_of_actions=1, enable_proposition_check=self.enable_quality_check_for_selfconsistency)
-        
-        fluency_passed, fluency_passed_score, fluency_feedback = \
-            self._check_proposition(agent, self.action_fluency, tentative_action, enable_proposition_check=self.enable_quality_check_for_fluency)
+        # Early exit if persona adherence fails
+        if not persona_adherence_passed:
+             return False, persona_adherence_score, persona_adherence_feedback
 
-        suitability_passed, suitability_score, suitability_feedback = \
-            self._check_proposition(agent, self.action_suitability, tentative_action, enable_proposition_check=self.enable_quality_check_for_suitability)
+        #
+        # Parallel Quality Checks for the rest
+        #
+        def run_check(check_info):
+            name, prop, min_actions, enabled = check_info
+            return name, self._check_proposition(agent, prop, tentative_action, minimum_required_qty_of_actions=min_actions, enable_proposition_check=enabled)
+
+        other_checks = [
+            ("self_consistency", self.action_self_consistency, 1, self.enable_quality_check_for_selfconsistency),
+            ("fluency", self.action_fluency, 0, self.enable_quality_check_for_fluency),
+            ("suitability", self.action_suitability, 0, self.enable_quality_check_for_suitability)
+        ]
         
+        results_dict = self._check_multiple_propositions(agent, other_checks, tentative_action)
+
+        selfconsistency_passed, selfconsistency_score, selfconsistency_feedback = results_dict["self_consistency"]
+        fluency_passed, fluency_passed_score, fluency_feedback = results_dict["fluency"]
+        suitability_passed, suitability_score, suitability_feedback = results_dict["suitability"]
+        
+        # Similarity check (local, so no need to parallelize)
         similarity_passed, similarity_score, similarity_feedback = \
             self._check_next_action_similarity(agent, tentative_action, threshold=self.max_action_similarity, enable_similarity_check=self.enable_quality_check_for_similarity)
 
@@ -427,7 +544,13 @@ class ActionGenerator(JsonSerializableRegistry):
 
         if enable_proposition_check:
             if agent.actions_count >= minimum_required_qty_of_actions:
-                result = proposition.score(target=agent, claim_variables={"action": tentative_action}, return_full_response=True)
+                # Cache check
+                cache_key = (id(proposition), agent.name, json.dumps(tentative_action, sort_keys=True))
+                if cache_key in self.evaluation_cache:
+                    result = self.evaluation_cache[cache_key]
+                else:
+                    result = proposition.score(target=agent, claim_variables={"action": tentative_action}, return_full_response=True)
+                    self.evaluation_cache[cache_key] = result
 
                 value_with_justification = f"Score = {result['value']} (out of {Proposition.MAX_SCORE}). Justification = {result['justification']}" 
 

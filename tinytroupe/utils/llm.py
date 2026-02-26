@@ -851,55 +851,58 @@ def extract_json(text: str) -> dict:
         logger.debug(f"Extracting JSON from text: {text}")
 
         # if it already is a dictionary or list, return it
-        if isinstance(text, dict) or isinstance(text, list):
-
-            # validate that all the internal contents are indeed JSON-like
+        if isinstance(text, (dict, list)):
             try:
                 json.dumps(text)
-            except Exception as e:
-                logger.error(f"Error occurred while validating JSON: {e}. Input text: {text}.")
-                return {}
+                return text
+            except Exception:
+                return None
 
-            logger.debug(f"Text is already a dictionary. Returning it.")
-            return text
+        if not isinstance(text, str):
+            return None
 
-        filtered_text = ""
+        # Robust removal of <think> blocks (including unclosed ones)
+        text = re.sub(r"<think>.*?(</think>|$)", "", text, flags=re.DOTALL)
 
-        # remove any text before the first opening curly or square braces, using regex. Leave the braces.
-        filtered_text = re.sub(r'^.*?({|\[)', r'\1', text, flags=re.DOTALL)
+        # Find all JSON-like candidates using braces
+        # We look for the largest matching pairs of {} or []
+        candidates = []
 
-        # remove any trailing text after the LAST closing curly or square braces, using regex. Leave the braces.
-        filtered_text  =  re.sub(r'(}|\])(?!.*(\]|\})).*$', r'\1', filtered_text, flags=re.DOTALL)
+        # Try to find { ... }
+        for match in re.finditer(r'\{.*\}', text, re.DOTALL):
+            candidates.append(match.group(0))
         
-        # remove invalid escape sequences, which show up sometimes
-        filtered_text = re.sub("\\'", "'", filtered_text) # replace \' with just '
-        filtered_text = re.sub("\\,", ",", filtered_text)
+        # Try to find [ ... ]
+        for match in re.finditer(r'\[.*\]', text, re.DOTALL):
+            candidates.append(match.group(0))
 
-        # parse the final JSON in a robust manner, to account for potentially messy LLM outputs
-        try:
-            # First try standard JSON parsing
-            # use strict=False to correctly parse new lines, tabs, etc.
-            parsed = json.loads(filtered_text, strict=False)
-        except json.JSONDecodeError:
-            # If JSON parsing fails, try ast.literal_eval which accepts single quotes
+        # Sort candidates by length (descending) to try the most complete ones first
+        candidates.sort(key=len, reverse=True)
+
+        for filtered_text in candidates:
+            # remove invalid escape sequences
+            filtered_text = re.sub(r"\\'", "'", filtered_text)
+            filtered_text = re.sub("\\\,", ",", filtered_text)
+
             try:
-                parsed = ast.literal_eval(filtered_text)
-                logger.debug("Used ast.literal_eval as fallback for single-quoted JSON-like text")
-            except:
-                # If both fail, try converting single quotes to double quotes and parse again
-                # Replace single-quoted keys and values with double quotes, without using look-behind
-                # This will match single-quoted strings that are keys or values in JSON-like structures
-                # It may not be perfect for all edge cases, but works for most LLM outputs
-                converted_text = re.sub(r"'([^']*)'", r'"\1"', filtered_text)
-                parsed = json.loads(converted_text, strict=False)
-                logger.debug("Converted single quotes to double quotes before parsing")
+                return json.loads(filtered_text, strict=False)
+            except json.JSONDecodeError:
+                try:
+                    import ast
+                    return ast.literal_eval(filtered_text)
+                except Exception:
+                    # Try manual single quote replacement as a last resort
+                    try:
+                        converted = re.sub(r"'([^']*)'", r'"\1"', filtered_text)
+                        return json.loads(converted, strict=False)
+                    except Exception:
+                        continue
         
-        # return the parsed JSON object
-        return parsed
+        return None
     
     except Exception as e:
-        logger.error(f"Error occurred while extracting JSON: {e}. Input text: {text}. Filtered text: {filtered_text}")
-        return {}
+        logger.error(f"Error occurred while extracting JSON: {e}")
+        return None
 
 def extract_code_block(text: str) -> str:
     """

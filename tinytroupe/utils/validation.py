@@ -4,6 +4,7 @@ import unicodedata
 
 from pydantic import ValidationError, BaseModel
 from tinytroupe.utils import logger
+from tinytroupe.utils.llm import extract_json
 
 ################################################################################
 # Validation
@@ -54,11 +55,17 @@ def to_pydantic_or_sanitized_dict(value: dict, model: BaseModel=None) -> dict:
     Converts the specified model response dictionary to a Pydantic model instance, or sanitizes it if the model is not valid.
     It is assumed that the dict contains the `content` key.
     """
+    from tinytroupe.openai_utils import NonTerminalError
 
     if model is not None and (isinstance(model, type) and issubclass(model, BaseModel)):
         # If a model is provided, try to validate the value against the model
+        extracted = extract_json(value['content'])
+        if extracted is None:
+            logger.warning(f"Failed to extract JSON from LLM response: {value['content']}")
+            raise NonTerminalError(f"Failed to extract JSON from LLM response")
+
         try:
-            res = model.model_validate(sanitize_dict(json.loads(value['content'])))
+            res = model.model_validate(sanitize_dict(extracted))
             return res
         except ValidationError as e:
             logger.warning(f"Validation error: {e}")

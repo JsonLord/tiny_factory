@@ -267,11 +267,24 @@ class OpenAIClient:
             # complete message
             logger.debug(f"   --> Complete messages sent to LLM: {chat_api_params['messages']}")
 
-            result_message = self.client.beta.chat.completions.parse(
-                    **chat_api_params
-                )
+            try:
+                result_message = self.client.beta.chat.completions.parse(
+                        **chat_api_params
+                    )
+                return result_message
+            except Exception as e:
+                logger.warning(f"Error while parsing LLM response with .parse(): {e}. Falling back to .create().")
+                # Fallback to regular create if parse fails (e.g. due to messy JSON with <think> tags)
+                # We need to remove response_format if it's a Pydantic model for create()
+                # but wait, completions.create also supports response_format={"type": "json_object"}
 
-            return result_message 
+                # If it was a Pydantic model, we convert it to json_object for the fallback
+                if not isinstance(chat_api_params["response_format"], dict):
+                    chat_api_params["response_format"] = {"type": "json_object"}
+
+                return self.client.chat.completions.create(
+                            **chat_api_params
+                        )
         
         else:
             logger.debug(f"Calling LLM model with these parameters: {logged_params}. Not showing 'messages' parameter.")
@@ -322,8 +335,8 @@ class OpenAIClient:
             elif "gpt-3.5-turbo" in model:
                 logger.debug("Token count: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
                 return self._count_tokens(messages, model="gpt-3.5-turbo-0613")
-            elif ("gpt-4" in model) or ("ppo" in model) or ("alias-large" in model):
-                logger.debug("Token count: gpt-4/alias-large may update over time. Returning num tokens assuming gpt-4-0613.")
+            elif ("gpt-4" in model) or ("ppo" in model) or ("alias-large" in model) or ("alias-huge" in model) or ("alias-fast" in model):
+                logger.debug(f"Token count: {model} may update over time. Returning num tokens assuming gpt-4-0613.")
                 return self._count_tokens(messages, model="gpt-4-0613")
             else:
                 raise NotImplementedError(
