@@ -322,8 +322,8 @@ class OpenAIClient:
             elif "gpt-3.5-turbo" in model:
                 logger.debug("Token count: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
                 return self._count_tokens(messages, model="gpt-3.5-turbo-0613")
-            elif ("gpt-4" in model) or ("ppo" in model) or ("alias-large" in model):
-                logger.debug("Token count: gpt-4/alias-large may update over time. Returning num tokens assuming gpt-4-0613.")
+            elif ("gpt-4" in model) or ("ppo" in model) or ("alias-large" in model) or ("alias-huge" in model) or ("alias-fast" in model):
+                logger.debug(f"Token count: {model} may update over time. Returning num tokens assuming gpt-4-0613.")
                 return self._count_tokens(messages, model="gpt-4-0613")
             else:
                 raise NotImplementedError(

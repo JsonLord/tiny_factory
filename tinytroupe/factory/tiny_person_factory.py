@@ -516,6 +516,7 @@ class TinyPersonFactory(TinyFactory):
         # a technicality - we need to use an auxiliary method to be able to use the transactional decorator effectively.
         return self._initialize_sampling_plan_transaction(n=self.population_size, description=self.sampling_space_description,context=self.context_text)
         
+    @transactional()
     def _initialize_sampling_plan_transaction(self, n, description, context):
         """
         Auxiliary method to initialize the sampling plan. This is needed in order to be able to use the transactional decorator,
