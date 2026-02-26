@@ -74,7 +74,8 @@ def generate_personas(business_description, customer_profile, num_personas, blab
             total_population_size=num_personas
         )
 
-        people = factory.generate_people(number_of_people=num_personas, parallelize=False)
+        # Restricted to deep persona generation with double sequential API call
+        people = factory.generate_people(number_of_people=num_personas, parallelize=False, deep_persona=True)
         personas_data = [person._persona for person in people]
         
         # --- NEW: Update the Tresor ---

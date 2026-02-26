@@ -433,10 +433,16 @@ class HelmholtzBlabladorClient(OpenAIClient):
         """
         Sets up the Helmholtz Blablador API configurations for this client.
         """
-        if self.client is None:
+        api_key = os.getenv("BLABLADOR_API_KEY")
+        if not api_key:
+            logger.warning("BLABLADOR_API_KEY not found in environment.")
+            api_key = "dummy"
+
+        if self.client is None or self.client.api_key != api_key:
+            logger.debug(f"Setting up Helmholtz client with base_url and key.")
             self.client = OpenAI(
                 base_url="https://api.helmholtz-blablador.fz-juelich.de/v1",
-                api_key=os.getenv("BLABLADOR_API_KEY", "dummy"),
+                api_key=api_key,
             )
 
 ###########################################################################

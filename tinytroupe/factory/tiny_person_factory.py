@@ -180,7 +180,8 @@ class TinyPersonFactory(TinyFactory):
                         frequency_penalty:float=0.0,
                         presence_penalty:float=0.0, 
                         attempts:int=10,
-                        post_processing_func=None) -> TinyPerson:
+                        post_processing_func=None,
+                        deep_persona:bool=True) -> TinyPerson:
         """
         Generate a TinyPerson instance using OpenAI's LLM.
 
@@ -318,6 +319,10 @@ class TinyPersonFactory(TinyFactory):
         
         # create the fresh agent
         if agent_spec is not None:
+            # If deep_persona is requested, perform the second API call to enrich the persona
+            if deep_persona:
+                agent_spec = self._generate_deep_persona_internal(agent_spec)
+
             # the agent is created here. This is why the present method cannot be cached. Instead, an auxiliary method is used
             # for the actual model call, so that it gets cached properly without skipping the agent creation.
             
@@ -390,7 +395,8 @@ class TinyPersonFactory(TinyFactory):
                         attempts:int=10, 
                         post_processing_func=None,
                         parallelize=None,
-                        verbose:bool=False) -> list:
+                        verbose:bool=False,
+                        deep_persona:bool=True) -> list:
         """
         Generate a list of TinyPerson instances using OpenAI's LLM.
 
@@ -430,7 +436,8 @@ class TinyPersonFactory(TinyFactory):
                                                         presence_penalty=presence_penalty,
                                                         attempts=attempts, 
                                                         post_processing_func=post_processing_func,
-                                                        verbose=verbose)
+                                                        verbose=verbose,
+                                                        deep_persona=deep_persona)
         else:
             people = self._generate_people_sequentially(number_of_people=number_of_people, 
                                                         agent_particularities=agent_particularities, 
@@ -439,7 +446,8 @@ class TinyPersonFactory(TinyFactory):
                                                         presence_penalty=presence_penalty,
                                                         attempts=attempts, 
                                                         post_processing_func=post_processing_func,
-                                                        verbose=verbose)
+                                                        verbose=verbose,
+                                                        deep_persona=deep_persona)
         
         return people
         
@@ -452,7 +460,8 @@ class TinyPersonFactory(TinyFactory):
                         presence_penalty:float=0.0,
                         attempts:int=10, 
                         post_processing_func=None,
-                        verbose:bool=False) -> list:
+                        verbose:bool=False,
+                        deep_persona:bool=True) -> list:
         people = []
 
         #
@@ -464,19 +473,20 @@ class TinyPersonFactory(TinyFactory):
 
         # this is the function that will be executed in parallel
         def generate_person_wrapper(args):
-            self, i, agent_particularities, temperature, frequency_penalty, presence_penalty, attempts, post_processing_func = args
+            self, i, agent_particularities, temperature, frequency_penalty, presence_penalty, attempts, post_processing_func, deep_persona = args
             person = self.generate_person(agent_particularities=agent_particularities, 
                                         temperature=temperature, 
                                         frequency_penalty=frequency_penalty,
                                         presence_penalty=presence_penalty,
                                         attempts=attempts,
-                                        post_processing_func=post_processing_func)
+                                        post_processing_func=post_processing_func,
+                                        deep_persona=deep_persona)
             return i, person
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             # we use a list of futures to keep track of the results
             futures = [
-                executor.submit(generate_person_wrapper, (self, i, agent_particularities, temperature, frequency_penalty, presence_penalty, attempts, post_processing_func))
+                executor.submit(generate_person_wrapper, (self, i, agent_particularities, temperature, frequency_penalty, presence_penalty, attempts, post_processing_func, deep_persona))
                 for i in range(number_of_people)
             ]
 
@@ -503,7 +513,8 @@ class TinyPersonFactory(TinyFactory):
                         presence_penalty:float=0.0,
                         attempts:int=10, 
                         post_processing_func=None,
-                        verbose:bool=False) -> list:
+                        verbose:bool=False,
+                        deep_persona:bool=True) -> list:
         """
         Generate the people sequentially, not in parallel. This is a simpler alternative.
         """
@@ -514,7 +525,8 @@ class TinyPersonFactory(TinyFactory):
                           frequency_penalty=frequency_penalty,
                           presence_penalty=presence_penalty,
                           attempts=attempts,
-                          post_processing_func=post_processing_func)
+                          post_processing_func=post_processing_func,
+                          deep_persona=deep_persona)
             if person is not None:
                 people.append(person)
             info_msg = f"Generated person {i+1}/{number_of_people}: {person.minibio()}"
@@ -1340,6 +1352,42 @@ class TinyPersonFactory(TinyFactory):
                                                   presence_penalty=presence_penalty,
                                                   response_format={"type": "json_object"})
     
+    def _generate_deep_persona_internal(self, initial_spec: dict) -> dict:
+        """
+        Performs a second API call to enrich the persona with a depth of 350 attributes.
+        """
+        logger.info(f"Enriching persona {initial_spec.get('name')} to deep persona (depth 350)...")
+
+        prompt = f"""
+        You are an expert persona generator. You have been provided with an initial persona profile:
+        {json.dumps(initial_spec, indent=4)}
+
+        TASK:
+        Take all the attributes from this initial profile and expand them significantly to reach a depth of 350 attributes/nuances.
+        The final profile must be incredibly detailed, authentic, and realistic.
+        Expand on every field: education, occupation, style, personality, preferences, beliefs, skills, behaviors, health, relationships, and other_facts.
+        Provide at least 50 detailed entries for each complex field (preferences, beliefs, other_facts).
+
+        Rules:
+        - Maintain consistency with the initial profile.
+        - Output ONLY a valid JSON object.
+        - Use the same field structure as the input.
+        """
+
+        messages = [
+            {"role": "system", "content": "You are a specialized system for creating ultra-deep, 350-attribute persona specifications."},
+            {"role": "user", "content": prompt}
+        ]
+
+        # Use the Helmholtz client via send_message
+        message = self._aux_model_call(messages=messages, temperature=1.2, frequency_penalty=0.0, presence_penalty=0.0)
+
+        if message is not None:
+            enriched_spec = utils.extract_json(message["content"])
+            return enriched_spec
+
+        return initial_spec
+
     @transactional()
     def _setup_agent(self, agent, configuration):
         """
