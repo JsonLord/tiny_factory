@@ -69,8 +69,13 @@ class ActionGenerator(JsonSerializableRegistry):
         self.action_persona_adherence = propositions.hard_action_persona_adherence.copy()
 
         self.action_self_consistency = propositions.action_self_consistency.copy()
+        self.action_self_consistency.model = "alias-large"
+
         self.action_fluency = propositions.action_fluency.copy()
+        self.action_fluency.model = "alias-large"
+
         self.action_suitability = propositions.action_suitability.copy()
+        self.action_suitability.model = "alias-large"
 
         # Non-critical checks use the default model (assumed to be faster)
 

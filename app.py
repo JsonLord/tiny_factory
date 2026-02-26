@@ -87,15 +87,14 @@ def generate_personas(business_description, customer_profile, num_personas, mode
         factory = TinyPersonFactory(
             context=business_description,
             sampling_space_description=customer_profile,
-            total_population_size=num_personas
+            total_population_size=None # Avoid sampling path for better performance
         )
 
-        # Force initialization to show progress
-        factory.initialize_sampling_plan()
-        yield [], f"Sampling plan initialized. Generating {num_personas} personas in parallel... 🚀", gr.update(visible=True)
+        # factory.initialize_sampling_plan() is not needed when total_population_size is None
+        yield [], f"Generating {num_personas} personas in parallel... 🚀", gr.update(visible=True)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(num_personas, 5)) as executor:
-            futures = [executor.submit(factory.generate_person) for _ in range(num_personas)]
+            futures = [executor.submit(factory.generate_person, agent_particularities=customer_profile) for _ in range(num_personas)]
 
             completed = 0
             for future in concurrent.futures.as_completed(futures):
