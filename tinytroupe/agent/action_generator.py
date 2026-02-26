@@ -410,7 +410,8 @@ class ActionGenerator(JsonSerializableRegistry):
             logger.error(f"Error in batch evaluation: {e}")
             # Fallback to individual checks or assume success
             return {info[0]: (True, Proposition.MAX_SCORE, "Batch check failed, assuming success") for info in propositions_info}
-\n    def _check_action_quality(self, stage, agent, tentative_action):
+
+    def _check_action_quality(self, stage, agent, tentative_action):
 
         from tinytroupe.agent import logger # import here to avoid circular import issues
         from tinytroupe.utils.parallel import parallel_map
