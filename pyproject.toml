@@ -3,11 +3,11 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["tinytroupe"]
+packages = ["deeppersona"]
 include-package-data = true
 
 [project]
-name = "tinytroupe"
+name = "deeppersona"
 version = "0.5.2"
 authors = [
   { name="Paulo Salem", email="paulo.salem@microsoft.com" }
@@ -41,7 +41,7 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/microsoft/tinytroupe"
+"Homepage" = "https://github.com/microsoft/deeppersona"
 
 [tool.pytest.ini_options]
 pythonpath = [
@@ -56,4 +56,4 @@ markers = [
   "examples: mark a test as the execution of examples",
   "notebooks: mark a test as a more specific Jupyter notebook execution example",
 ]
-addopts = "--cov=tinytroupe --cov-report=html --cov-report=xml"
+addopts = "--cov=deeppersona --cov-report=html --cov-report=xml"

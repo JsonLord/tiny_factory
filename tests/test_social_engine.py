@@ -1,15 +1,15 @@
 import pytest
-from tinytroupe.social_network import NetworkTopology
-from tinytroupe.network_generator import NetworkGenerator
-from tinytroupe.influence import InfluencePropagator
-from tinytroupe.agent import TinyPerson
-from tinytroupe.agent.social_types import Content
+from deeppersona.social_network import NetworkTopology
+from deeppersona.network_generator import NetworkGenerator
+from deeppersona.influence import InfluencePropagator
+from deeppersona.agent import DeepPersona
+from deeppersona.agent.social_types import Content
 
 def test_network_topology():
-    TinyPerson.clear_agents()
+    DeepPersona.clear_agents()
     topo = NetworkTopology()
-    p1 = TinyPerson("Alice")
-    p2 = TinyPerson("Bob")
+    p1 = DeepPersona("Alice")
+    p2 = DeepPersona("Bob")
 
     topo.add_persona(p1)
     topo.add_persona(p2)
@@ -23,8 +23,8 @@ def test_network_topology():
     assert p1.social_connections["Bob"].strength == 0.9
 
 def test_network_generation():
-    TinyPerson.clear_agents()
-    personas = [TinyPerson(f"P{i}") for i in range(10)]
+    DeepPersona.clear_agents()
+    personas = [DeepPersona(f"P{i}") for i in range(10)]
     gen = NetworkGenerator(personas)
 
     sf_net = gen.generate_scale_free_network(10, 2)
@@ -36,9 +36,9 @@ def test_network_generation():
     assert len(sw_net.edges) > 0
 
 def test_influence_propagation():
-    TinyPerson.clear_agents()
+    DeepPersona.clear_agents()
     topo = NetworkTopology()
-    personas = [TinyPerson(f"P{i}") for i in range(5)]
+    personas = [DeepPersona(f"P{i}") for i in range(5)]
     for p in personas:
         topo.add_persona(p)
         # Give them high engagement probability to ensure propagation in test
@@ -54,7 +54,7 @@ def test_influence_propagation():
 
     # Mock calculate_engagement_probability to always return high value
     from unittest.mock import patch
-    with patch.object(TinyPerson, 'calculate_engagement_probability', return_value=0.8):
+    with patch.object(DeepPersona, 'calculate_engagement_probability', return_value=0.8):
         result = propagator.propagate(["P0"], content)
 
         assert result.total_reach > 1

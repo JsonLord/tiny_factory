@@ -1,10 +1,10 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from tinytroupe.factory.tiny_person_factory import TinyPersonFactory
+from deeppersona.factory.deep_persona_factory import DeepPersonaFactory
 
 @pytest.fixture
 def mock_client():
-    with patch("tinytroupe.openai_utils.client") as mock:
+    with patch("deeppersona.openai_utils.client") as mock:
         client = MagicMock()
         mock.return_value = client
         # Return a simple persona JSON
@@ -15,7 +15,7 @@ def mock_client():
         yield client
 
 def test_deep_persona_sequential_calls(mock_client):
-    factory = TinyPersonFactory(context="Context")
+    factory = DeepPersonaFactory(context="Context")
 
     # We expect generate_person to be called,
     # which internally calls several LLM steps.

@@ -1,31 +1,31 @@
 import pytest
 import time
 from unittest.mock import MagicMock, patch
-from tinytroupe.agent import TinyPerson
-from tinytroupe.simulation_manager import SimulationManager, SimulationConfig
-from tinytroupe.agent.social_types import Content
+from deeppersona.agent import DeepPersona
+from deeppersona.simulation_manager import SimulationManager, SimulationConfig
+from deeppersona.agent.social_types import Content
 
 @pytest.fixture
 def mock_llm():
-    with patch("tinytroupe.openai_utils.client") as mock:
+    with patch("deeppersona.openai_utils.client") as mock:
         client = MagicMock()
         mock.return_value = client
         client.send_message.return_value = {"content": "{}"}
         yield client
 
 def test_async_simulation_and_chat(mock_llm):
-    TinyPerson.clear_agents()
+    DeepPersona.clear_agents()
     manager = SimulationManager()
 
-    with patch("tinytroupe.factory.tiny_person_factory.TinyPersonFactory.generate_people") as mock_gen:
-        mock_gen.return_value = [TinyPerson("P1"), TinyPerson("P2")]
+    with patch("deeppersona.factory.deep_persona_factory.DeepPersonaFactory.generate_people") as mock_gen:
+        mock_gen.return_value = [DeepPersona("P1"), DeepPersona("P2")]
         config = SimulationConfig(name="Async Test", persona_count=2)
         sim = manager.create_simulation(config)
 
     content = Content(text="Async test post")
 
-    with patch("tinytroupe.environment.social_tiny_world.SocialTinyWorld.simulate_content_spread") as mock_spread:
-        from tinytroupe.environment.social_tiny_world import SimulationResult
+    with patch("deeppersona.environment.social_deep_world.SocialDeepWorld.simulate_content_spread") as mock_spread:
+        from deeppersona.environment.social_deep_world import SimulationResult
         from datetime import datetime
         res = SimulationResult(content, datetime.now())
         mock_spread.return_value = res
@@ -51,11 +51,11 @@ def test_async_simulation_and_chat(mock_llm):
     assert sim.progress == 1.0
 
 def test_focus_groups(mock_llm):
-    TinyPerson.clear_agents()
+    DeepPersona.clear_agents()
     manager = SimulationManager()
 
-    with patch("tinytroupe.factory.tiny_person_factory.TinyPersonFactory.generate_people") as mock_gen:
-        mock_gen.return_value = [TinyPerson("P1"), TinyPerson("P2")]
+    with patch("deeppersona.factory.deep_persona_factory.DeepPersonaFactory.generate_people") as mock_gen:
+        mock_gen.return_value = [DeepPersona("P1"), DeepPersona("P2")]
         config = SimulationConfig(name="Base Sim", persona_count=2)
         sim = manager.create_simulation(config)
 

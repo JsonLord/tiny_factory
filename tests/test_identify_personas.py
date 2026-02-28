@@ -4,7 +4,7 @@ from app import identify_personas
 
 @pytest.fixture
 def mock_llm():
-    with patch("tinytroupe.openai_utils.client") as mock:
+    with patch("deeppersona.openai_utils.client") as mock:
         client = MagicMock()
         mock.return_value = client
         # Mock indices returned by select_relevant_personas_utility
