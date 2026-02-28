@@ -25,7 +25,7 @@ def test_extract_persona_parameters_success():
     with patch('tinytroupe.openai_utils.client') as mock_client:
         mock_instance = MagicMock()
         mock_instance.send_message.return_value = {
-            "content": '{"age": 25, "gender": "Female", "occupation": "Engineer", "city": "NYC", "country": "USA", "custom_values": "Innovation", "custom_life_attitude": "Positive", "life_story": "A story", "interests_hobbies": "Coding", "attribute_count": 200}'
+            "content": '{"age": 25, "gender": "Female", "occupation": "Engineer", "city": "NYC", "country": "USA", "custom_values": "Innovation", "custom_life_attitude": "Positive", "life_story": "A story", "interests_hobbies": "Coding", "attribute_count": 350}'
         }
         mock_client.return_value = mock_instance
 
@@ -45,7 +45,7 @@ def test_generate_personas(mock_client_class):
             "age": 25, "gender": "Female", "occupation": "Engineer",
             "city": "NYC", "country": "USA", "custom_values": "Innovation",
             "custom_life_attitude": "Positive", "life_story": "A story",
-            "interests_hobbies": "Coding", "attribute_count": 200
+            "interests_hobbies": "Coding", "attribute_count": 350
         }
 
         # We need an API key to pass the check

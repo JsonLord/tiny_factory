@@ -43,7 +43,7 @@ def extract_persona_parameters(business_description: str, customer_profile: str)
     - `custom_life_attitude` (str): The life attitude of the persona.
     - `life_story` (str): A brief life story of the persona.
     - `interests_hobbies` (str): Interests and hobbies of the persona.
-    - `attribute_count` (float): Attribute richness, default to 200.
+    - `attribute_count` (float): Attribute richness, default to 350.
 
     You must return a valid JSON object containing exactly these keys.
     """
@@ -76,7 +76,7 @@ def extract_persona_parameters(business_description: str, customer_profile: str)
                 if key not in extracted_json:
                     # provide defaults for missing ones
                     if key in ['age', 'attribute_count']:
-                        extracted_json[key] = 200 if key == 'attribute_count' else 30
+                        extracted_json[key] = 350 if key == 'attribute_count' else 30
                     else:
                         extracted_json[key] = "Unknown"
 
@@ -96,7 +96,7 @@ def extract_persona_parameters(business_description: str, customer_profile: str)
         "custom_life_attitude": "Optimistic",
         "life_story": "A standard professional background with a passion for their field.",
         "interests_hobbies": "Technology, Reading",
-        "attribute_count": 200
+        "attribute_count": 350
     }
 
 def generate_personas(business_description, customer_profile, num_personas, blablador_api_key=None):
@@ -148,7 +148,7 @@ def generate_personas(business_description, customer_profile, num_personas, blab
                 custom_life_attitude=str(params.get("custom_life_attitude", "Optimistic")),
                 life_story=str(params.get("life_story", "A standard professional background with a passion for their field.")),
                 interests_hobbies=str(params.get("interests_hobbies", "Technology, Reading")),
-                attribute_count=float(params.get("attribute_count", 200)),
+                attribute_count=float(params.get("attribute_count", 350)),
                 api_name="/generate_persona"
             )
 
