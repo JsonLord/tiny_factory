@@ -12,10 +12,20 @@ app = FastAPI()
 def health():
     return {"status": "ok"}
 
+from fastapi.responses import RedirectResponse
+
 @app.get("/api-docs")
 def api_docs():
-    # In fastapi /docs is the swagger ui, but let's provide a JSON response as well for this specific endpoint.
-    return {"message": "API documentation is available at /docs"}
+    return RedirectResponse(url="/docs")
+
+class PersonaRequest(BaseModel):
+    business_description: str
+    customer_profile: str
+    num_personas: int = 1
+
+@app.post("/api/v1/generate_personas")
+def generate_personas_api(req: PersonaRequest):
+    return generate_personas(req.business_description, req.customer_profile, req.num_personas)
 
 def extract_persona_parameters(business_description: str, customer_profile: str) -> dict:
     from tinytroupe.openai_utils import client
@@ -114,7 +124,7 @@ def generate_personas(business_description, customer_profile, num_personas, blab
         # For multiple personas, we could call this in a loop or once.
         # The prompt implies we want to do it in a pipeline. We'll do it per persona or once based on the prompt.
         # Let's do it per persona to generate distinct ones, passing an index or just relying on LLM variance.
-        
+
         # Connect to gradio client
         # In a real scenario, the Hugging Face Token might be needed if the Space is private.
         # But deeppersona-experience is public or assumed accessible.
