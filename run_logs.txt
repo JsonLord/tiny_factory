@@ -1,7 +1,0 @@
-2026-03-09 18:13:09,109 - tinytroupe - DEBUG - Initializing OpenAIClient
-2026-03-09 18:13:09,109 - tinytroupe - DEBUG - Initializing AzureClient
-2026-03-09 18:13:09,109 - tinytroupe - DEBUG - Initializing OpenAIClient
-2026-03-09 18:13:09,109 - tinytroupe - DEBUG - Initializing HelmholtzBlabladorClient
-2026-03-09 18:13:09,109 - tinytroupe - DEBUG - Initializing OpenAIClient
-/app/app.py:116: UserWarning: The parameters have been moved from the Blocks constructor to the launch() method in Gradio 6.0: css. Please pass these parameters to launch() instead.
-  with gr.Blocks(css=".big-input textarea { height: 300px !important; } #mesh-network-container { height: 600px; background: #101622; border-radius: 12px; }", title="Tiny Factory") as demo:

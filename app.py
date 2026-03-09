@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from tinytroupe.simulation_manager import SimulationManager, SimulationConfig
 from tinytroupe.agent.social_types import Content
-from tinytroupe.agent.tiny_person import TinyPerson
+from tinytroupe.agent import TinyPerson
 import tinytroupe.openai_utils as openai_utils
 
 # Initialize Simulation Manager
@@ -16,28 +16,28 @@ REMOTE_BACKEND = "https://auxteam-tiny-factory.hf.space"
 
 def generate_personas(business_description, customer_profile, num_personas, api_key=None):
     if api_key:
-        os.environ["BLABLADOR_API_KEY"] = api_key
         os.environ["OPENAI_API_KEY"] = api_key
 
     import json
+    import random
     from gradio_client import Client
     import openai
+    from tinytroupe.agent import TinyPerson
 
     client = openai.OpenAI()
     dp_client = Client("THzva/deeppersona-experience")
 
     personas = []
 
-    for _ in range(int(num_personas)):
-        # 1. Generate initial parameters for the 200 API call
+    for i in range(int(num_personas)):
+        # 1. Generate initial parameters for the 200 API call using OpenAI compatible endpoint
         prompt_1 = f"""
 Given the following business description and customer profile:
 Business: {business_description}
 Customer: {customer_profile}
 
-Generate realistic parameters for a persona that fits this profile. Return ONLY a valid JSON object with these EXACT keys:
+Generate realistic parameters for a persona. Return ONLY a valid JSON object with these EXACT keys:
 "Age" (number), "Gender" (string), "Occupation" (string), "City" (string), "Country" (string), "Personal Values" (string), "Life Attitude" (string), "Life Story" (string), "Interests and Hobbies" (string).
-Keep the string fields concise (1-2 sentences).
 """
         response_1 = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -96,8 +96,8 @@ Extract and enhance specific details to create an updated set of parameters. Ret
 Based on this final generated persona output:
 {result_400}
 
-Extract the persona details into a structured format. Return ONLY a valid JSON object with these EXACT keys:
-"name" (string, make one up if not found), "age" (number), "nationality" (string), "country_of_residence" (string), "occupation" (string), "residence" (string).
+Extract the persona details. Return ONLY a valid JSON object with these EXACT keys:
+"name" (string, make one up if not found), "age" (number), "nationality" (string), "country_of_residence" (string), "occupation" (string).
 """
         response_3 = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -105,10 +105,21 @@ Extract the persona details into a structured format. Return ONLY a valid JSON o
             response_format={"type": "json_object"}
         )
         final_persona = json.loads(response_3.choices[0].message.content)
-        final_persona["full_profile_text"] = result_400
-        personas.append(final_persona)
+
+        # Transform output into a tinytroupe persona profile
+        tp = TinyPerson(name=final_persona.get("name", f"Persona {i+1}"))
+        tp._persona["age"] = final_persona.get("age", 30)
+        tp._persona["nationality"] = final_persona.get("nationality", "Unknown")
+        tp._persona["country_of_residence"] = final_persona.get("country_of_residence", "Unknown")
+        tp._persona["residence"] = final_persona.get("country_of_residence", "Unknown")
+        tp._persona["occupation"] = final_persona.get("occupation", "Professional")
+        tp._persona["full_profile_text"] = result_400
+
+        personas.append(tp._persona)
 
     return personas
+
+
 def start_simulation(name, content_text, format_type, persona_count, network_type):
     config = SimulationConfig(name=name, persona_count=int(persona_count), network_type=network_type)
     sim = simulation_manager.create_simulation(config)
