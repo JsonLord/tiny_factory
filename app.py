@@ -24,27 +24,41 @@ def generate_personas(business_description, customer_profile, num_personas, api_
     import openai
     from tinytroupe.agent import TinyPerson
 
-    client = openai.OpenAI()
+    # Initialize the OpenAI client pointing to the Helmholtz endpoint
+    client = openai.OpenAI(
+        base_url="https://api.helmholtz-blablador.fz-juelich.de/v1",
+        api_key=api_key or os.environ.get("BLABLADOR_API_KEY") or os.environ.get("OPENAI_API_KEY", "dummy")
+    )
     dp_client = Client("THzva/deeppersona-experience")
 
     personas = []
 
     for i in range(int(num_personas)):
-        # 1. Generate initial parameters for the 200 API call using OpenAI compatible endpoint
+        # 1. Generate initial parameters for the 200 API call
         prompt_1 = f"""
 Given the following business description and customer profile:
 Business: {business_description}
 Customer: {customer_profile}
 
-Generate realistic parameters for a persona. Return ONLY a valid JSON object with these EXACT keys:
-"Age" (number), "Gender" (string), "Occupation" (string), "City" (string), "Country" (string), "Personal Values" (string), "Life Attitude" (string), "Life Story" (string), "Interests and Hobbies" (string).
+Generate realistic parameters for a persona. Return ONLY a valid JSON object with these EXACT keys (do not wrap in markdown blocks):
+{{"Age": 30, "Gender": "Female", "Occupation": "Teacher", "City": "Berlin", "Country": "Germany", "Personal Values": "Hard work", "Life Attitude": "Optimistic", "Life Story": "Born in Munich", "Interests and Hobbies": "Reading"}}
 """
-        response_1 = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt_1}],
-            response_format={"type": "json_object"}
-        )
-        params_1 = json.loads(response_1.choices[0].message.content)
+        try:
+            response_1 = client.chat.completions.create(
+                model="alias-fast",
+                messages=[{"role": "user", "content": prompt_1}],
+                temperature=0.7
+            )
+            raw_content = response_1.choices[0].message.content.strip()
+            # Clean up markdown code blocks if the model hallucinates them
+            if raw_content.startswith("```json"):
+                raw_content = raw_content[7:-3].strip()
+            elif raw_content.startswith("```"):
+                raw_content = raw_content[3:-3].strip()
+            params_1 = json.loads(raw_content)
+        except Exception as e:
+            print("Fallback for params_1 due to error:", e)
+            params_1 = {}
 
         # 2. Call DeepPersona with 200 attributes
         result_200 = dp_client.predict(
@@ -66,15 +80,24 @@ Generate realistic parameters for a persona. Return ONLY a valid JSON object wit
 Based on this generated persona output:
 {result_200}
 
-Extract and enhance specific details to create an updated set of parameters. Return ONLY a valid JSON object with these EXACT keys:
-"Age" (number), "Gender" (string), "Occupation" (string), "City" (string), "Country" (string), "Personal Values" (string), "Life Attitude" (string), "Life Story" (string), "Interests and Hobbies" (string).
+Extract and enhance specific details to create an updated set of parameters. Return ONLY a valid JSON object with these EXACT keys (do not wrap in markdown blocks):
+{{"Age": 30, "Gender": "Female", "Occupation": "Teacher", "City": "Berlin", "Country": "Germany", "Personal Values": "Hard work", "Life Attitude": "Optimistic", "Life Story": "Born in Munich", "Interests and Hobbies": "Reading"}}
 """
-        response_2 = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt_2}],
-            response_format={"type": "json_object"}
-        )
-        params_2 = json.loads(response_2.choices[0].message.content)
+        try:
+            response_2 = client.chat.completions.create(
+                model="alias-fast",
+                messages=[{"role": "user", "content": prompt_2}],
+                temperature=0.7
+            )
+            raw_content2 = response_2.choices[0].message.content.strip()
+            if raw_content2.startswith("```json"):
+                raw_content2 = raw_content2[7:-3].strip()
+            elif raw_content2.startswith("```"):
+                raw_content2 = raw_content2[3:-3].strip()
+            params_2 = json.loads(raw_content2)
+        except Exception as e:
+            print("Fallback for params_2 due to error:", e)
+            params_2 = params_1
 
         # 4. Call DeepPersona with 400 attributes
         result_400 = dp_client.predict(
@@ -87,7 +110,7 @@ Extract and enhance specific details to create an updated set of parameters. Ret
             custom_life_attitude=params_2.get("Life Attitude", "Positive"),
             life_story=params_2.get("Life Story", "Grew up in the city"),
             interests_hobbies=params_2.get("Interests and Hobbies", "Reading"),
-            attribute_count=400,
+            attribute_count=350,
             api_name="/generate_persona"
         )
 
@@ -96,15 +119,24 @@ Extract and enhance specific details to create an updated set of parameters. Ret
 Based on this final generated persona output:
 {result_400}
 
-Extract the persona details. Return ONLY a valid JSON object with these EXACT keys:
-"name" (string, make one up if not found), "age" (number), "nationality" (string), "country_of_residence" (string), "occupation" (string).
+Extract the persona details. Return ONLY a valid JSON object with these EXACT keys (do not wrap in markdown blocks):
+{{"name": "John Doe", "age": 30, "nationality": "American", "country_of_residence": "USA", "occupation": "Teacher"}}
 """
-        response_3 = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt_3}],
-            response_format={"type": "json_object"}
-        )
-        final_persona = json.loads(response_3.choices[0].message.content)
+        try:
+            response_3 = client.chat.completions.create(
+                model="alias-fast",
+                messages=[{"role": "user", "content": prompt_3}],
+                temperature=0.7
+            )
+            raw_content3 = response_3.choices[0].message.content.strip()
+            if raw_content3.startswith("```json"):
+                raw_content3 = raw_content3[7:-3].strip()
+            elif raw_content3.startswith("```"):
+                raw_content3 = raw_content3[3:-3].strip()
+            final_persona = json.loads(raw_content3)
+        except Exception as e:
+            print("Fallback for final_persona due to error:", e)
+            final_persona = {}
 
         # Transform output into a tinytroupe persona profile
         tp = TinyPerson(name=final_persona.get("name", f"Persona {i+1}"))
