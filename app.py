@@ -2,16 +2,44 @@ import gradio as gr
 import pandas as pd
 import json
 import random
+
+import os
 import requests
 import os
 from datetime import datetime
-from tinytroupe.simulation_manager import SimulationManager, SimulationConfig
-from tinytroupe.agent.social_types import Content
-from tinytroupe.agent import TinyPerson
-import tinytroupe.openai_utils as openai_utils
+
+# Defer imports of heavy modules
+import importlib
+
+def get_tinytroupe_modules():
+    global Content, TinyPerson, openai_utils, SimulationManager, SimulationConfig
+    if 'Content' not in globals():
+        from tinytroupe.agent.social_types import Content
+        from tinytroupe.agent import TinyPerson
+        import tinytroupe.openai_utils as openai_utils
+        from tinytroupe.simulation_manager import SimulationManager, SimulationConfig
+        globals().update({
+            'Content': Content,
+            'TinyPerson': TinyPerson,
+            'openai_utils': openai_utils,
+            'SimulationManager': SimulationManager,
+            'SimulationConfig': SimulationConfig
+        })
+
+class DummySimulationManager:
+    def __getattr__(self, name):
+        get_tinytroupe_modules()
+        global simulation_manager
+        # re-initialize the real one
+        simulation_manager = SimulationManager()
+        return getattr(simulation_manager, name)
+
+# Initialize a dummy wrapper that lazily loads the real manager
+simulation_manager = DummySimulationManager()
+
 
 # Initialize Simulation Manager
-simulation_manager = SimulationManager()
+
 REMOTE_BACKEND = "https://auxteam-tiny-factory.hf.space"
 
 def generate_personas(business_description, customer_profile, num_personas, api_key=None):
@@ -22,7 +50,6 @@ def generate_personas(business_description, customer_profile, num_personas, api_
     import random
     from gradio_client import Client
     import openai
-    from tinytroupe.agent import TinyPerson
 
     # Initialize the OpenAI client pointing to the Helmholtz endpoint
     client = openai.OpenAI(
@@ -62,16 +89,16 @@ Generate realistic parameters for a persona. Return ONLY a valid JSON object wit
 
         # 2. Call DeepPersona with 200 attributes
         result_200 = dp_client.predict(
-            age=params_1.get("Age", 30),
-            gender=params_1.get("Gender", "Female"),
-            occupation=params_1.get("Occupation", "Professional"),
-            city=params_1.get("City", "New York"),
-            country=params_1.get("Country", "USA"),
-            custom_values=params_1.get("Personal Values", "Hardworking"),
-            custom_life_attitude=params_1.get("Life Attitude", "Positive"),
-            life_story=params_1.get("Life Story", "Grew up in the city"),
-            interests_hobbies=params_1.get("Interests and Hobbies", "Reading"),
-            attribute_count=200,
+            age=float(params_1.get("Age", 30)),
+            gender=str(params_1.get("Gender", "Female")),
+            occupation=str(params_1.get("Occupation", "Professional")),
+            city=str(params_1.get("City", "New York")),
+            country=str(params_1.get("Country", "USA")),
+            custom_values=str(params_1.get("Personal Values", "Hardworking")),
+            custom_life_attitude=str(params_1.get("Life Attitude", "Positive")),
+            life_story=str(params_1.get("Life Story", "Grew up in the city")),
+            interests_hobbies=str(params_1.get("Interests and Hobbies", "Reading")),
+            attribute_count=200.0,
             api_name="/generate_persona"
         )
 
@@ -101,16 +128,16 @@ Extract and enhance specific details to create an updated set of parameters. Ret
 
         # 4. Call DeepPersona with 400 attributes
         result_400 = dp_client.predict(
-            age=params_2.get("Age", 30),
-            gender=params_2.get("Gender", "Female"),
-            occupation=params_2.get("Occupation", "Professional"),
-            city=params_2.get("City", "New York"),
-            country=params_2.get("Country", "USA"),
-            custom_values=params_2.get("Personal Values", "Hardworking"),
-            custom_life_attitude=params_2.get("Life Attitude", "Positive"),
-            life_story=params_2.get("Life Story", "Grew up in the city"),
-            interests_hobbies=params_2.get("Interests and Hobbies", "Reading"),
-            attribute_count=350,
+            age=float(params_2.get("Age", 30)),
+            gender=str(params_2.get("Gender", "Female")),
+            occupation=str(params_2.get("Occupation", "Professional")),
+            city=str(params_2.get("City", "New York")),
+            country=str(params_2.get("Country", "USA")),
+            custom_values=str(params_2.get("Personal Values", "Hardworking")),
+            custom_life_attitude=str(params_2.get("Life Attitude", "Positive")),
+            life_story=str(params_2.get("Life Story", "Grew up in the city")),
+            interests_hobbies=str(params_2.get("Interests and Hobbies", "Reading")),
+            attribute_count=350.0,
             api_name="/generate_persona"
         )
 
@@ -138,21 +165,24 @@ Extract the persona details. Return ONLY a valid JSON object with these EXACT ke
             print("Fallback for final_persona due to error:", e)
             final_persona = {}
 
-        # Transform output into a tinytroupe persona profile
-        tp = TinyPerson(name=final_persona.get("name", f"Persona {i+1}"))
-        tp._persona["age"] = final_persona.get("age", 30)
-        tp._persona["nationality"] = final_persona.get("nationality", "Unknown")
-        tp._persona["country_of_residence"] = final_persona.get("country_of_residence", "Unknown")
-        tp._persona["residence"] = final_persona.get("country_of_residence", "Unknown")
-        tp._persona["occupation"] = final_persona.get("occupation", "Professional")
-        tp._persona["full_profile_text"] = result_400
+        # Transform output into a tinytroupe persona profile structure directly
+        tp_persona = {
+            "name": final_persona.get("name", f"Persona {i+1}"),
+            "age": final_persona.get("age", 30),
+            "nationality": final_persona.get("nationality", "Unknown"),
+            "country_of_residence": final_persona.get("country_of_residence", "Unknown"),
+            "residence": final_persona.get("country_of_residence", "Unknown"),
+            "occupation": final_persona.get("occupation", "Professional"),
+            "full_profile_text": result_400
+        }
 
-        personas.append(tp._persona)
+        personas.append(tp_persona)
 
     return personas
 
 
 def start_simulation(name, content_text, format_type, persona_count, network_type):
+    get_tinytroupe_modules()
     config = SimulationConfig(name=name, persona_count=int(persona_count), network_type=network_type)
     sim = simulation_manager.create_simulation(config)
     content = Content(text=content_text, format=format_type)
@@ -171,11 +201,13 @@ def get_persona_details(sim_id, persona_name):
 
 # API functions for backward compatibility
 def generate_social_network_api(name, persona_count, network_type, focus_group_name=None):
+    get_tinytroupe_modules()
     config = SimulationConfig(name=name, persona_count=int(persona_count), network_type=network_type)
     sim = simulation_manager.create_simulation(config, focus_group_name)
     return {"simulation_id": sim.id, "persona_count": len(sim.personas)}
 
 def predict_engagement_api(simulation_id, content_text, format_type):
+    get_tinytroupe_modules()
     sim = simulation_manager.get_simulation(simulation_id)
     if not sim: return {"error": "Simulation not found"}
     content = Content(text=content_text, format=format_type)
@@ -186,6 +218,7 @@ def predict_engagement_api(simulation_id, content_text, format_type):
     return results
 
 def start_simulation_async_api(simulation_id, content_text, format_type):
+    get_tinytroupe_modules()
     content = Content(text=content_text, format=format_type)
     simulation_manager.run_simulation(simulation_id, content, background=True)
     return {"status": "started", "simulation_id": simulation_id}
@@ -238,6 +271,72 @@ def save_focus_group_api(name, simulation_id):
     return {"status": "success", "name": name}
 
 # UI Layout
+
+def get_example_personas():
+    example_path = "tinytroupe/examples/agents/"
+    if not os.path.exists(example_path):
+        return []
+    try:
+        files = [f for f in os.listdir(example_path) if f.endswith(".json") or f.endswith(".md")]
+        return sorted(files)
+    except Exception as e:
+        print(f"Error listing example personas: {e}")
+        return []
+
+def update_persona_preview(file):
+    if not file: return ""
+    try:
+        path = os.path.join("tinytroupe/examples/agents/", file)
+        with open(path, "r") as f:
+            data = json.load(f)
+
+        name = data.get("name") or data.get("persona", {}).get("name") or "Unknown"
+        age = data.get("age", data.get("persona", {}).get("age", "N/A"))
+        occ = data.get("occupation", {}).get("title", data.get("persona", {}).get("occupation", {}).get("title", data.get("occupation", "N/A")))
+        if isinstance(occ, dict): occ = occ.get('title', 'N/A')
+
+        bio = data.get("mental_faculties", [{}])[0].get("context") if "mental_faculties" in data else "An example persona."
+        if not bio and "persona" in data:
+            bio = data["persona"].get("minibio", "")
+
+        summary = f"### Persona: {name}\n**Age**: {age} | **Occupation**: {occ}\n\n**Summary**: {bio}"
+        return summary
+    except Exception as e:
+        return f"Error loading preview: {e}"
+
+def generate_personas_router(business_description, customer_profile, num_personas, method, example_file, api_key=None):
+    if method == "DeepPersona":
+        # Call the existing DeepPersona implementation
+        return generate_personas(business_description, customer_profile, num_personas, api_key)
+    elif method == "TinyTroupe":
+        if api_key:
+            os.environ["OPENAI_API_KEY"] = api_key
+        from tinytroupe.factory.tiny_person_factory import TinyPersonFactory
+        factory = TinyPersonFactory(context=f"{business_description} {customer_profile}")
+        personas = factory.generate_people(number_of_people=int(num_personas))
+        return [p._persona for p in personas]
+    elif method == "Example Persona":
+        if not example_file:
+            return []
+        try:
+            path = os.path.join("tinytroupe/examples/agents/", example_file)
+            with open(path, "r") as f:
+                data = json.load(f)
+            # Create a simple profile representation
+            name = data.get("name") or data.get("persona", {}).get("name") or "Unknown"
+            persona_dict = data.get("persona", data)
+
+            get_tinytroupe_modules()
+            # Use TinyPerson object initialization to ensure valid structure
+            tp = TinyPerson(name=name)
+            tp.include_persona_definitions(persona_dict)
+            return [tp._persona] * int(num_personas)
+        except Exception as e:
+            print(f"Error loading example: {e}")
+            return []
+
+    return []
+
 with gr.Blocks(css=".big-input textarea { height: 300px !important; } #mesh-network-container { height: 600px; background: #101622; border-radius: 12px; }", title="Tiny Factory") as demo:
     gr.HTML('<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>')
     gr.Markdown("# 🌐 Tiny Factory: Social Simulation Dashboard")
@@ -271,6 +370,29 @@ with gr.Blocks(css=".big-input textarea { height: 300px !important; } #mesh-netw
                     cust_prof = gr.Textbox(label="Customer Profile", lines=5)
                     gen_count = gr.Number(label="Count", value=5)
                     blablador_key = gr.Textbox(label="API Key (Optional)", type="password")
+                    persona_method = gr.Radio(["Example Persona", "TinyTroupe", "DeepPersona"], label="Persona Generation Method", value="DeepPersona")
+
+                    with gr.Column(visible=False) as example_persona_col:
+                        gr.Markdown("#### Pre-configured Personas")
+                        example_personas = get_example_personas()
+                        initial_persona = example_personas[0] if example_personas else None
+                        example_persona_select = gr.Dropdown(
+                            label="Select Example Persona",
+                            choices=example_personas,
+                            value=initial_persona,
+                            allow_custom_value=True
+                        )
+                        example_persona_preview = gr.Markdown(
+                            label="Persona Preview",
+                            value=update_persona_preview(initial_persona) if initial_persona else ""
+                        )
+                        example_persona_select.change(fn=update_persona_preview, inputs=[example_persona_select], outputs=[example_persona_preview])
+
+                    def update_method_visibility(method):
+                        return gr.update(visible=(method == "Example Persona"))
+
+                    persona_method.change(fn=update_method_visibility, inputs=[persona_method], outputs=[example_persona_col])
+
                     gen_btn = gr.Button("Generate Personas")
                 with gr.Column():
                     gen_out = gr.JSON(label="Generated Personas")
@@ -316,7 +438,7 @@ with gr.Blocks(css=".big-input textarea { height: 300px !important; } #mesh-netw
 
     js_trigger_btn.click(on_persona_click, inputs=[js_trigger, current_sim_id], outputs=[detail_name, detail_json])
 
-    gen_btn.click(generate_personas, inputs=[biz_desc, cust_prof, gen_count, blablador_key], outputs=gen_out, api_name="generate_personas")
+    gen_btn.click(generate_personas_router, inputs=[biz_desc, cust_prof, gen_count, persona_method, example_persona_select, blablador_key], outputs=gen_out, api_name="generate_personas")
 
     # API endpoints (backward compatibility)
     with gr.Tab("API", visible=False):
