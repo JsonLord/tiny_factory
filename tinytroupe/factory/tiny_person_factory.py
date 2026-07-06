@@ -40,6 +40,7 @@ class TinyPersonFactory(TinyFactory):
         """
         super().__init__(simulation_id)
         self.person_prompt_template_path = os.path.join(os.path.dirname(__file__), 'prompts/generate_person.mustache')
+        self.person_batch_prompt_template_path = os.path.join(os.path.dirname(__file__), 'prompts/generate_person_batch.mustache')
         self.context_text = context
         self.sampling_space_description = sampling_space_description
         self.population_size = total_population_size
@@ -174,11 +175,11 @@ class TinyPersonFactory(TinyFactory):
         """
         TinyPersonFactory.all_unique_names = [] # clear the list of all unique names, so that the next factories can start fresh.
 
-    def generate_person(self, 
-                        agent_particularities:str=None, 
-                        temperature:float=1.2, 
+    def generate_person(self,
+                        agent_particularities:str=None,
+                        temperature:float=1.2,
                         frequency_penalty:float=0.0,
-                        presence_penalty:float=0.0, 
+                        presence_penalty:float=0.0,
                         attempts:int=10,
                         post_processing_func=None) -> TinyPerson:
         """
@@ -197,30 +198,147 @@ class TinyPersonFactory(TinyFactory):
         """
 
         logger.debug(f"Starting the person generation based these particularities: {agent_particularities}")
-        fresh_agent_name = None
 
-        # are we going to use a pre-computed sample of characteristics too?
+        final_particularities, restore_info = self._prepare_agent_particularities(agent_particularities)
+        if final_particularities is None:
+            return None
+
+        logger.info(f"Generating person with the following particularities: {final_particularities}")
+
+        user_prompt = self._build_person_generation_user_prompt(final_particularities)
+
+        agent_spec = self._generate_validated_agent_spec(user_prompt=user_prompt,
+                                                          temperature=temperature,
+                                                          frequency_penalty=frequency_penalty,
+                                                          presence_penalty=presence_penalty,
+                                                          attempts=attempts)
+
+        person = self._create_person_from_spec(agent_spec, post_processing_func)
+        if person is not None:
+            return person
+
+        logger.error(f"Could not generate an agent after {attempts} attempts.")
+        self._restore_failed_sample(restore_info)
+        return None
+
+    def generate_people_batch(self, batch_size:int,
+                              agent_particularities:str=None,
+                              temperature:float=1.2,
+                              frequency_penalty:float=0.0,
+                              presence_penalty:float=0.0,
+                              attempts:int=10,
+                              post_processing_func=None) -> list:
+        """
+        Generates up to `batch_size` TinyPerson instances from a single LLM call, instead of one call per
+        person. This amortizes the fixed prompt overhead (generation rules, full example personas) across
+        several people, which is the dominant cost when generating populations in the thousands.
+
+        Any slot that fails validation (malformed JSON, name collision, or simply missing from the
+        response) is regenerated individually as a fallback, so a partial batch failure never costs more
+        than the affected slots.
+
+        Args:
+            batch_size (int): How many people to request in this single LLM call.
+            agent_particularities (str): The particularities of the agents in this batch.
+            temperature (float): The temperature to use when sampling from the LLM.
+            frequency_penalty (float): The frequency penalty to use when sampling from the LLM.
+            presence_penalty (float): The presence penalty to use when sampling from the LLM.
+            attempts (int): The number of attempts to generate a valid batch (or a single fallback agent).
+            post_processing_func (function): A function to apply to each generated agent after it is created.
+
+        Returns:
+            list: The TinyPerson instances successfully generated (may be fewer than batch_size if the
+            underlying sample pool ran out).
+        """
+        prepared = [self._prepare_agent_particularities(agent_particularities) for _ in range(batch_size)]
+        # a slot can come back empty if the pre-computed characteristics sample ran out early
+        prepared = [p for p in prepared if p[0] is not None]
+
+        if len(prepared) == 0:
+            return []
+
+        particularities_texts = [p[0] for p in prepared]
+        restore_infos = [p[1] for p in prepared]
+
+        batch_user_prompt = self._build_batch_person_generation_user_prompt(particularities_texts)
+
+        def aux_generate_batch():
+            messages = [{"role": "system", "content": "You are a system that generates specifications for realistic simulations of people. You follow the generation rules and constraints carefully."},
+                        {"role": "user", "content": batch_user_prompt}]
+
+            message = self._aux_model_call(messages=messages,
+                                            temperature=temperature,
+                                            frequency_penalty=frequency_penalty,
+                                            presence_penalty=presence_penalty)
+            if message is None:
+                return None
+
+            result = utils.extract_json(message["content"])
+            return result if isinstance(result, list) else None
+
+        specs = None
+        attempt = 0
+        while specs is None and attempt < attempts:
+            try:
+                attempt += 1
+                specs = aux_generate_batch()
+            except Exception as e:
+                logger.error(f"Error while generating batch of agent specifications: {e}")
+
+        people = []
+        for i, particularities_text in enumerate(particularities_texts):
+            spec = specs[i] if specs is not None and i < len(specs) else None
+            person = self._create_person_from_spec(spec, post_processing_func)
+
+            if person is None:
+                # this slot was missing, malformed, or collided with an already-assigned name:
+                # regenerate it individually rather than losing the whole batch to one bad entry.
+                logger.info(f"Batch slot {i} was not usable, falling back to individual generation for it.")
+                single_user_prompt = self._build_person_generation_user_prompt(particularities_text)
+                fallback_spec = self._generate_validated_agent_spec(user_prompt=single_user_prompt,
+                                                                    temperature=temperature,
+                                                                    frequency_penalty=frequency_penalty,
+                                                                    presence_penalty=presence_penalty,
+                                                                    attempts=attempts)
+                person = self._create_person_from_spec(fallback_spec, post_processing_func)
+
+            if person is not None:
+                people.append(person)
+            else:
+                logger.error(f"Could not generate an agent (batch slot {i}) after {attempts} attempts.")
+                self._restore_failed_sample(restore_infos[i])
+
+        return people
+
+    def _prepare_agent_particularities(self, agent_particularities:str=None):
+        """
+        Finalizes the particularities text for the next agent to be generated, consuming either a
+        precomputed characteristics sample (when a population size was specified) or a freshly generated
+        unique name.
+
+        Returns:
+            tuple: (final_particularities_text, restore_info). `restore_info` is the sampled
+            characteristics dict that must be pushed back into the remaining sample pool if generation
+            ultimately fails, or None if there is nothing to restore. `final_particularities_text` is
+            None if there are no more characteristics samples left to draw from.
+        """
         if self.population_size is not None:
-            
             with concurrent_agent_generataion_lock:
                 if self.remaining_characteristics_sample is None:
                     # if the sample does not exist, we generate it here once.
                     self.initialize_sampling_plan()
-            
-            logger.debug(f"Sampling plan initialized. Remaining characteristics sample: {self.remaining_characteristics_sample}")
 
             # CONCURRENT PROTECTION
             with concurrent_agent_generataion_lock:
                 if len(self.remaining_characteristics_sample) == 0:
                     logger.warning("No more characteristics samples left to sample from. This can happen if the sampling plan did not sum up correctly.")
-                    return None
-                
-                else:
-                    sampled_characteristics = self.remaining_characteristics_sample.pop()
-                    logger.debug(f"Sampled agent: {sampled_characteristics['name']}.")
-            
+                    return None, None
+
+                sampled_characteristics = self.remaining_characteristics_sample.pop()
+                logger.debug(f"Sampled agent: {sampled_characteristics['name']}.")
+
             if agent_particularities is not None:
-                agent_particularities =\
+                final_particularities = \
                     f"""
                         - Primary characteristics: {agent_particularities}
 
@@ -234,19 +352,22 @@ class TinyPersonFactory(TinyFactory):
 
                     """
             else:
-                agent_particularities = \
+                final_particularities = \
                     f"""
                     - Name, demographics and other characteristics:
                          {json.dumps(sampled_characteristics, indent=4)}
                     """
+
+            return final_particularities, sampled_characteristics
+
         else: # no predefined population size, so we generate one-off agents.
             # CONCURRENT PROTECTION
             with concurrent_agent_generataion_lock:
-                fresh_agent_name = self._unique_full_name(already_generated_names=TinyPersonFactory._all_used_and_precomputed_names(), 
+                fresh_agent_name = self._unique_full_name(already_generated_names=TinyPersonFactory._all_used_and_precomputed_names(),
                                                         context=self.context_text)
 
             if agent_particularities is not None:
-                agent_particularities = \
+                final_particularities = \
                 f"""
 
                 - Primary characteristics: {agent_particularities}
@@ -257,39 +378,68 @@ class TinyPersonFactory(TinyFactory):
                 In case the primary characteristics already specify a name, please use the primary name and ignore the additional one.
                 """
             else:
-                agent_particularities = f"Full name: {fresh_agent_name}"
-                
+                final_particularities = f"Full name: {fresh_agent_name}"
 
-    
-        logger.info(f"Generating person with the following particularities: {agent_particularities}")
+            return final_particularities, None
 
-        # read example specs from files. 
+    def _restore_failed_sample(self, restore_info):
+        """
+        Pushes a sampled characteristics dict back into the remaining sample pool, after a failed
+        generation attempt that consumed it without producing a usable agent.
+        """
+        if restore_info is not None:
+            with concurrent_agent_generataion_lock:
+                self.remaining_characteristics_sample.append(restore_info)
+            logger.error(f"Name {restore_info.get('name')} was not used, it will be added back to the pool of names.")
+
+    def _build_person_generation_user_prompt(self, agent_particularities:str) -> str:
+        """
+        Builds the user prompt for generating a single agent specification.
+        """
+        # read example specs from files.
         example_1 = json.load(open(os.path.join(os.path.dirname(__file__), '../examples/agents/Friedrich_Wolf.agent.json'), 'r', encoding='utf-8', errors='replace'))
         example_2 = json.load(open(os.path.join(os.path.dirname(__file__), '../examples/agents/Sophie_Lefevre.agent.json'), 'r', encoding='utf-8', errors='replace'))
 
-        # We must include all agent names generated in the whole of the simulation, not only the ones generated by this factory,
-        # since they all share the same name space.
-        #
-        # For the minibios, we only need to keep track of the ones generated by this factory, since they are unique to each factory
-        # and are used to guide the sampling process.
-        user_prompt = chevron.render(open(self.person_prompt_template_path, 'r', encoding='utf-8', errors='replace').read(), {
+        return chevron.render(open(self.person_prompt_template_path, 'r', encoding='utf-8', errors='replace').read(), {
             "context": self.context_text,
             "agent_particularities": agent_particularities,
-            
+
             #Note that we need to dump them to JSON strings, to ensure we get double quotes,
             # and other formatting issues are avoided.
             "example_1": json.dumps(example_1["persona"], indent=4),
             "example_2": json.dumps(example_2["persona"], indent=4)
         })
 
+    def _build_batch_person_generation_user_prompt(self, particularities_texts:list) -> str:
+        """
+        Builds the user prompt for generating a whole batch of agent specifications (a JSON array)
+        in a single LLM call.
+        """
+        example_1 = json.load(open(os.path.join(os.path.dirname(__file__), '../examples/agents/Friedrich_Wolf.agent.json'), 'r', encoding='utf-8', errors='replace'))
+        example_2 = json.load(open(os.path.join(os.path.dirname(__file__), '../examples/agents/Sophie_Lefevre.agent.json'), 'r', encoding='utf-8', errors='replace'))
+
+        agents = [{"index": i + 1, "agent_particularities": text} for i, text in enumerate(particularities_texts)]
+
+        return chevron.render(open(self.person_batch_prompt_template_path, 'r', encoding='utf-8', errors='replace').read(), {
+            "context": self.context_text,
+            "count": len(particularities_texts),
+            "agents": agents,
+            "example_1": json.dumps(example_1["persona"], indent=4),
+            "example_2": json.dumps(example_2["persona"], indent=4)
+        })
+
+    def _generate_validated_agent_spec(self, user_prompt:str, temperature, frequency_penalty, presence_penalty, attempts) -> dict:
+        """
+        Calls the LLM to generate a single agent specification from the given user prompt, retrying up
+        to `attempts` times until a spec with a not-yet-assigned name is produced (or giving up and
+        returning None).
+        """
         def aux_generate(attempt):
-            messages = []
-            messages += [{"role": "system", "content": "You are a system that generates specifications for realistic simulations of people. You follow the generation rules and constraints carefully."},
+            messages = [{"role": "system", "content": "You are a system that generates specifications for realistic simulations of people. You follow the generation rules and constraints carefully."},
                         {"role": "user", "content": user_prompt}]
-            
 
             # due to a technicality, we need to call an auxiliary method to be able to use the transactional decorator.
-            message = self._aux_model_call(messages=messages, 
+            message = self._aux_model_call(messages=messages,
                                             temperature=temperature,
                                             frequency_penalty=frequency_penalty,
                                             presence_penalty=presence_penalty)
@@ -306,7 +456,7 @@ class TinyPersonFactory(TinyFactory):
                     logger.info(f"Person with name {result['name']} was already generated, cannot be reused.")
 
             return None # no suitable agent was generated
-        
+
         agent_spec = None
         attempt = 0
         while agent_spec is None and attempt < attempts:
@@ -315,31 +465,37 @@ class TinyPersonFactory(TinyFactory):
                 agent_spec = aux_generate(attempt=attempt)
             except Exception as e:
                 logger.error(f"Error while generating agent specification: {e}")
-        
-        # create the fresh agent
-        if agent_spec is not None:
-            # the agent is created here. This is why the present method cannot be cached. Instead, an auxiliary method is used
-            # for the actual model call, so that it gets cached properly without skipping the agent creation.
-            
-            # protect parallel agent generation
-            with concurrent_agent_generataion_lock:
-                person = TinyPerson(agent_spec["name"])
-                self._setup_agent(person, agent_spec)
-                if post_processing_func is not None:
-                    post_processing_func(person)
 
-                self.generated_minibios.append(person.minibio())
-                self.generated_names.append(person.get("name"))
+        return agent_spec
 
-            return person
-        else:
-            logger.error(f"Could not generate an agent after {attempts} attempts.")
-            if sampled_characteristics is not None:
-                self.remaining_characteristics_sample.append(sampled_characteristics)
-                logger.error(f"Name {fresh_agent_name} was not used, it will be added back to the pool of names.")
-
+    def _create_person_from_spec(self, agent_spec, post_processing_func=None) -> TinyPerson:
+        """
+        Creates and registers a TinyPerson from a validated agent spec. Re-checks the name for
+        collisions right before creation (under the same lock used for creation), since a concurrent
+        batch/thread may have claimed the name in the meantime.
+        """
+        if not isinstance(agent_spec, dict) or not agent_spec.get("name"):
             return None
-   
+
+        # the agent is created here. This is why the present method cannot be cached. Instead, an auxiliary method is used
+        # for the actual model call, so that it gets cached properly without skipping the agent creation.
+
+        # protect parallel agent generation
+        with concurrent_agent_generataion_lock:
+            if self._is_name_already_assigned(agent_spec["name"]):
+                logger.info(f"Person with name {agent_spec['name']} was already generated concurrently, cannot be reused.")
+                return None
+
+            person = TinyPerson(agent_spec["name"])
+            self._setup_agent(person, agent_spec)
+            if post_processing_func is not None:
+                post_processing_func(person)
+
+            self.generated_minibios.append(person.minibio())
+            self.generated_names.append(person.get("name"))
+
+        return person
+
     
     @config_manager.config_defaults(parallelize="parallel_agent_generation")
     def generate_from_linkedin_profile(self, profile_data: Dict) -> TinyPerson:
@@ -445,54 +601,60 @@ class TinyPersonFactory(TinyFactory):
         
 
     @transactional(parallel=True)
-    def _generate_people_in_parallel(self, number_of_people:int=None, 
-                        agent_particularities:str=None, 
-                        temperature:float=1.5, 
+    def _generate_people_in_parallel(self, number_of_people:int=None,
+                        agent_particularities:str=None,
+                        temperature:float=1.5,
                         frequency_penalty:float=0.0,
                         presence_penalty:float=0.0,
-                        attempts:int=10, 
+                        attempts:int=10,
                         post_processing_func=None,
                         verbose:bool=False) -> list:
         people = []
 
         #
-        # Concurrently generate the people. 
-        # 
-        # This vastly speeds up the process, but be careful with the number of workers, as too 
-        # many may cause the LLM to fail due to throttling by the API.
+        # Concurrently generate the people, in batches.
         #
+        # Two levers keep this efficient at populations in the thousands, without overwhelming the
+        # LLM API:
+        #   - person_generation_batch_size: how many full persona specs are requested per LLM call,
+        #     amortizing the fixed prompt overhead (rules, examples) across several people.
+        #   - person_generation_max_workers: a hard cap on concurrent in-flight LLM calls, so that
+        #     thousands of people don't translate into thousands of simultaneous requests.
+        #
+        batch_size = max(1, config_manager.get("person_generation_batch_size"))
+        max_workers = config_manager.get("person_generation_max_workers")
 
-        # this is the function that will be executed in parallel
-        def generate_person_wrapper(args):
-            self, i, agent_particularities, temperature, frequency_penalty, presence_penalty, attempts, post_processing_func = args
-            person = self.generate_person(agent_particularities=agent_particularities, 
-                                        temperature=temperature, 
-                                        frequency_penalty=frequency_penalty,
-                                        presence_penalty=presence_penalty,
-                                        attempts=attempts,
-                                        post_processing_func=post_processing_func)
-            return i, person
+        batch_sizes = []
+        remaining = number_of_people
+        while remaining > 0:
+            n = min(batch_size, remaining)
+            batch_sizes.append(n)
+            remaining -= n
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            # we use a list of futures to keep track of the results
-            futures = [
-                executor.submit(generate_person_wrapper, (self, i, agent_particularities, temperature, frequency_penalty, presence_penalty, attempts, post_processing_func))
-                for i in range(number_of_people)
-            ]
+        def generate_batch_wrapper(n):
+            return self.generate_people_batch(batch_size=n,
+                                              agent_particularities=agent_particularities,
+                                              temperature=temperature,
+                                              frequency_penalty=frequency_penalty,
+                                              presence_penalty=presence_penalty,
+                                              attempts=attempts,
+                                              post_processing_func=post_processing_func)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(generate_batch_wrapper, n) for n in batch_sizes]
 
             # we iterate over the futures as they are completed, and collect the results
             for future in concurrent.futures.as_completed(futures):
-                i, person = future.result()
-                if person is not None:
-                    people.append(person)
-                    info_msg = f"Generated person {i+1}/{number_of_people}: {person.minibio()}"
+                batch_people = future.result()
+                people.extend(batch_people)
 
-                    if verbose:
-                        logger.info(info_msg)
+                if verbose:
+                    for person in batch_people:
+                        logger.info(f"Generated person {len(people)}/{number_of_people}: {person.minibio()}")
 
-                else:
-                    logger.error(f"Could not generate person {i+1}/{number_of_people}. Continuing with the remaining ones.")
-            
+        if len(people) < number_of_people:
+            logger.error(f"Could only generate {len(people)}/{number_of_people} people. Continuing with the ones generated.")
+
         return people
         
     # TODO still make this one available? 
@@ -606,42 +768,98 @@ class TinyPersonFactory(TinyFactory):
             logger.info(f"Sample plan has been flattened, contains {len(self.remaining_characteristics_sample)} total samples.")
             logger.debug(f"Remaining characteristics sample: {json.dumps(self.remaining_characteristics_sample, indent=4)}")
 
-            # generate names for each sample individually, considering all their characteristics
+            # Generate names for all samples, considering their characteristics. This used to be done one
+            # sample at a time (one LLM call each, sequentially), which does not scale to thousands of
+            # samples. Instead, we batch samples together (name_generation_batch_size per LLM call) and
+            # process the batches concurrently (bounded by person_generation_max_workers), falling back to
+            # one-by-one generation only for a batch that can't be validated as a whole.
             all_used_names = TinyPersonFactory._all_used_and_precomputed_names()
-            
-            for i, sample in enumerate(self.remaining_characteristics_sample):
-                logger.debug(f"Generating name for sample {i+1}/{len(self.remaining_characteristics_sample)}")
-                
-                # randomize the all_used_names to make the context less predictable for the LLM, thereby introducing some additional randomness.
-                # Note that we use a fixed random seed to ensure that the sampling plan is reproducible and cache can be kept.
-                TinyFactory.randomizer.shuffle(all_used_names)
 
-                # generate a name that's appropriate for this specific sample's characteristics
+            # randomize the all_used_names to make the context less predictable for the LLM, thereby introducing some additional randomness.
+            # Note that we use a fixed random seed to ensure that the sampling plan is reproducible and cache can be kept.
+            TinyFactory.randomizer.shuffle(all_used_names)
+            forbidden_names_snapshot = copy.deepcopy(all_used_names)
+
+            samples = self.remaining_characteristics_sample
+            name_batch_size = max(1, config_manager.get("name_generation_batch_size"))
+            max_workers = config_manager.get("person_generation_max_workers")
+
+            batches = [list(range(start, min(start + name_batch_size, len(samples))))
+                       for start in range(0, len(samples), name_batch_size)]
+
+            def generate_names_for_batch(indices):
+                batch_samples = [samples[i] for i in indices]
+
                 try:
-                    
-                    # A dummy name to start with, in case the name generation fails.
-                    sample["name"] = f"Agent_{utils.fresh_id('agents_names')}"
-
-                    name = utils.try_function(
-                        lambda: self._generate_name_for_sample(
-                            sample_characteristics=sample,
-                            already_generated_names=all_used_names
+                    names = utils.try_function(
+                        lambda: self._generate_names_for_samples_batch(
+                            samples_characteristics=batch_samples,
+                            already_generated_names=forbidden_names_snapshot
                         ),
-                        # ensure the name is not in already used names
-                        postcond_func=lambda result: result not in all_used_names,
-                        retries=15
+                        # the batch result must have exactly one name per sample, all distinct from
+                        # each other and from the names already in use
+                        postcond_func=lambda result: (
+                            isinstance(result, list)
+                            and len(result) == len(batch_samples)
+                            and len(set(result)) == len(result)
+                            and len(set(forbidden_names_snapshot).intersection(result)) == 0
+                        ),
+                        retries=5
                     )
-                    
-                    sample["name"] = name
-                    all_used_names.append(name)
-                    
                 except Exception as e:
-                    logger.error(f"Error generating name for sample {i}: {e}")
-                    # fallback: use a simple default name with index
-                    fallback_name = f"Person_{i}_{sample.get('gender', 'unknown')}"
-                    sample["name"] = fallback_name
-                    all_used_names.append(fallback_name)
-            
+                    logger.error(f"Error generating a batch of names, falling back to one-by-one generation for this batch: {e}")
+                    names = None
+
+                if names is None:
+                    # fall back to the slower, one-name-at-a-time approach for just this batch, to
+                    # guarantee correctness even if the batched call could not be made to work
+                    names = []
+                    for i, sample in enumerate(batch_samples):
+                        try:
+                            name = utils.try_function(
+                                lambda: self._generate_name_for_sample(
+                                    sample_characteristics=sample,
+                                    already_generated_names=forbidden_names_snapshot + names
+                                ),
+                                postcond_func=lambda result: result not in forbidden_names_snapshot and result not in names,
+                                retries=15
+                            )
+                        except Exception as e:
+                            logger.error(f"Error generating a fallback name for sample: {e}")
+                            name = f"Person_{utils.fresh_id('agents_names')}_{sample.get('gender', 'unknown')}"
+                        names.append(name)
+
+                return names
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_indices = {executor.submit(generate_names_for_batch, indices): indices for indices in batches}
+
+                for future in concurrent.futures.as_completed(future_to_indices):
+                    indices = future_to_indices[future]
+                    names = future.result()
+                    for idx, name in zip(indices, names):
+                        samples[idx]["name"] = name
+
+            # batches run concurrently and are only checked against the snapshot taken before dispatch,
+            # so as a last step we fix up any names that nonetheless collided across batches (rare).
+            seen_names = set(forbidden_names_snapshot)
+            for sample in samples:
+                if sample["name"] in seen_names:
+                    try:
+                        new_name = utils.try_function(
+                            lambda: self._generate_name_for_sample(
+                                sample_characteristics=sample,
+                                already_generated_names=list(seen_names)
+                            ),
+                            postcond_func=lambda result: result not in seen_names,
+                            retries=15
+                        )
+                    except Exception as e:
+                        logger.error(f"Error fixing up a name that collided across batches: {e}")
+                        new_name = f"Person_{utils.fresh_id('agents_names')}_{sample.get('gender', 'unknown')}"
+                    sample["name"] = new_name
+                seen_names.add(sample["name"])
+
             logger.info("Names generated for all samples in the sampling plan.")
             
             # update the global list of unique names
@@ -1409,6 +1627,65 @@ class TinyPersonFactory(TinyFactory):
 
         Returns:
             str: A single full name appropriate for the sample characteristics.
+        """
+        # the body of this method is handled by the @llm decorator
+
+    @transactional()
+    @utils.llm(temperature=1.2, frequency_penalty=0.3, presence_penalty=0.3)
+    def _generate_names_for_samples_batch(self, samples_characteristics: List[dict], already_generated_names: list) -> list:
+        """
+        Generates a list of full names, one for each of the given sample characteristics, in the same
+        order. This is the batched counterpart of the single-sample name generator: it exists so that
+        many names can be produced with one LLM call instead of one call per sample, which matters when
+        generating populations in the thousands.
+
+        Each name must be as appropriate as possible to its corresponding sample's full characteristics
+        (not just gender), considering things like:
+        - Gender
+        - Age or age range
+        - Country/nationality/ethnicity
+        - Socioeconomic status
+        - Profession
+        - Educational background
+        - Cultural background
+        - Any other relevant demographic or personal characteristics
+
+        Every generated name must:
+        - Be realistic, natural, and culturally appropriate for its corresponding sample's characteristics.
+        - Be unique: it must not repeat any name in already_generated_names, and it must not repeat any
+          other name you generate in this same response.
+
+        If you need additional methods to ensure uniqueness, you can:
+        - Use longer or more uncommon names.
+        - Include middle names or multiple surnames.
+        - Use culturally appropriate name variations.
+        - As a last resort, append a number, but this should be avoided.
+
+        In ANY CASE, you **must never** generate a name that already appears in already_generated_names,
+        nor repeat a name across the elements of your own response.
+
+        ## Example
+
+        **Input:**
+            samples_characteristics: [
+                {"gender": "female", "age": 28, "country": "Brazil", "profession": "Software Engineer"},
+                {"gender": "male", "age": 61, "country": "Portugal", "profession": "Retired Fisherman"}
+            ]
+            already_generated_names: ["João Silva", "Maria Santos", "Ana Costa"]
+
+        **Output:**
+            ["Camila Rodrigues", "Manuel Ferreira"]
+
+        Note that the output has exactly one name per input sample, in the same order, and none of them
+        appear in already_generated_names.
+
+        Args:
+            samples_characteristics (list): The complete characteristics of each sample, in order.
+            already_generated_names (list): Names that must not be reused.
+
+        Returns:
+            list: A list of full names, one per element of samples_characteristics, in the same order,
+            with no repeats among themselves or against already_generated_names.
         """
         # the body of this method is handled by the @llm decorator
 
