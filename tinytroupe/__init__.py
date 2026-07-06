@@ -68,6 +68,10 @@ class ConfigManager:
         self._config["parallel_agent_actions"] = config["Simulation"].getboolean("PARALLEL_AGENT_ACTIONS", True)
         self._config["parallel_agent_generation"] = config["Simulation"].getboolean("PARALLEL_AGENT_GENERATION", True)
 
+        self._config["person_generation_max_workers"] = config["Simulation"].getint("PERSON_GENERATION_MAX_WORKERS", 15)
+        self._config["person_generation_batch_size"] = config["Simulation"].getint("PERSON_GENERATION_BATCH_SIZE", 5)
+        self._config["name_generation_batch_size"] = config["Simulation"].getint("NAME_GENERATION_BATCH_SIZE", 25)
+
         self._config["enable_memory_consolidation"] = config["Cognition"].get("ENABLE_MEMORY_CONSOLIDATION", True)
         self._config["min_episode_length"] = config["Cognition"].getint("MIN_EPISODE_LENGTH", 30)
         self._config["max_episode_length"] = config["Cognition"].getint("MAX_EPISODE_LENGTH", 100)  
